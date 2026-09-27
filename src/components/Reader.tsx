@@ -56,7 +56,8 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   const [current, setCurrent] = useState(0);
   const currentRef = useRef(0);
-  const [barsVisible, setBarsVisible] = useState(false);
+  const [barsVisible, setBarsVisible] = useState(true);
+  const [showHint, setShowHint] = useState(false);
   const [overlay, setOverlay] = useState<'none' | 'toc' | 'settings'>('none');
 
   const syncingRef = useRef(false);
@@ -333,6 +334,13 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
       pendingScrollRef.current = { chapter: start, para: saved.paragraphIndex, ratio: saved.paragraphProgress };
       setReady(true);
       forceRender();
+      // 首次进入时控制栏默认可见，并短暂提示操作方式
+      setBarsVisible(true);
+      setShowHint(true);
+      window.setTimeout(() => {
+        setShowHint(false);
+        setBarsVisible(false);
+      }, 4000);
     })();
     return () => {
       cancelled = true;
@@ -518,6 +526,10 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
       )}
 
       {!ready && <div className="loading">加载中…</div>}
+
+      {ready && showHint && overlay === 'none' && (
+        <div className="tap-hint">轻点屏幕中央可显示 / 隐藏菜单（目录、设置）</div>
+      )}
     </div>
   );
 }

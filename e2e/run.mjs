@@ -97,10 +97,14 @@ async function setRange(page, selector, index, value) {
   }, value);
 }
 
-/** 点击正文中央，切换控制栏 */
+/** 确保控制栏可见（初始自动显示 4 秒后会隐藏，不可见时点屏幕中央） */
 async function toggleBars(page) {
-  await page.mouse.click(195, 400);
-  await sleep(200);
+  for (let i = 0; i < 3; i++) {
+    if (await page.locator('.bottom-bar').isVisible()) return;
+    await page.mouse.click(195, 400);
+    await sleep(200);
+  }
+  if (!(await page.locator('.bottom-bar').isVisible())) throw new Error('控制栏无法显示');
 }
 
 try {
@@ -227,11 +231,12 @@ try {
     !!rect && rect.top < rect.view * 0.6 && rect.bottom > -50,
     rect ? `top=${rect.top.toFixed(0)} view=${rect.view}` : 'anchor missing',
   );
-  // 关闭设置（关闭后控制栏仍保持可见）
+  // 关闭设置
   await page.locator('.settings-sheet .bar-btn', { hasText: '完成' }).click();
   await sleep(300);
 
   // ---------- 10. 目录跳到第 1000 章 ----------
+  await toggleBars(page);
   await page.locator('.bottom-bar .bar-btn', { hasText: '目录' }).click();
   await page.waitForSelector('.toc-search');
   await page.fill('.toc-search', TITLES[1000]);

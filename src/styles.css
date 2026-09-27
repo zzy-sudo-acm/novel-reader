@@ -248,6 +248,21 @@ section:first-child .ch-title {
   font-size: 0.85em;
 }
 
+.tap-hint {
+  position: absolute;
+  left: 50%;
+  top: 55%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 13px;
+  padding: 8px 14px;
+  border-radius: 16px;
+  pointer-events: none;
+  z-index: 25;
+  white-space: nowrap;
+}
+
 .loading {
   position: absolute;
   inset: 0;
