@@ -1,0 +1,14 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+
+# 绝不提交任何小说数据
+book.json
+**/book.json
+*.book.json
+books-data/
+
+# 本地测试产物
+e2e/results/
