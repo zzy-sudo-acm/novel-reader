@@ -1,5 +1,5 @@
 import type { BookMeta, TocEntry } from './types';
-import { clearChapters, getAllBooks, putBook, putChapterBatch } from './db';
+import { getAllBooks, readSavedProgress, replaceBook } from './db';
 
 interface RawBook {
   title?: unknown;
@@ -33,12 +33,13 @@ export async function importBookFile(
     throw new Error('文件格式不正确：缺少 title 或 chapters');
   }
   const title = raw.title.trim();
+  if (!title) throw new Error('文件格式不正确：书名不能为空');
   const chapters: { title: string; content: string }[] = [];
   for (const c of raw.chapters) {
     const ch = c as { title?: unknown; content?: unknown };
     if (typeof ch?.title === 'string' && typeof ch?.content === 'string') {
       chapters.push({ title: ch.title, content: ch.content });
-    }
+    } else throw new Error('文件中有格式错误的章节，未导入，请检查 title 和 content');
   }
   if (chapters.length === 0) throw new Error('文件格式不正确：没有有效章节');
 
@@ -54,12 +55,7 @@ export async function importBookFile(
   // 同名书籍视为重新导入：覆盖章节，章节数一致时保留阅读进度
   const existing = (await getAllBooks()).find((b) => b.title === title);
   const id = existing?.id ?? crypto.randomUUID();
-  const keepProgress = existing && existing.chapterCount === chapters.length ? existing.progress : undefined;
-
-  if (existing) {
-    onProgress(0.08, '清理旧数据…');
-    await clearChapters(existing.id);
-  }
+  const keepProgress = existing && existing.chapterCount === chapters.length ? await readSavedProgress(existing) : undefined;
 
   const book: BookMeta = {
     id,
@@ -69,14 +65,12 @@ export async function importBookFile(
     totalChars,
     addedAt: Date.now(),
     progress: keepProgress,
+    progressUpdatedAt: Date.now(),
   };
 
-  const BATCH = 100;
-  for (let i = 0; i < chapters.length; i += BATCH) {
-    await putChapterBatch(id, i, chapters.slice(i, i + BATCH));
-    onProgress(0.1 + 0.88 * Math.min(1, (i + BATCH) / chapters.length), `写入章节 ${Math.min(i + BATCH, chapters.length)}/${chapters.length}…`);
-  }
-  await putBook(book);
+  await replaceBook(book, chapters, (written) => {
+    onProgress(0.1 + 0.88 * written / chapters.length, `写入章节 ${written}/${chapters.length}…`);
+  });
   onProgress(1, '完成');
   return book;
 }

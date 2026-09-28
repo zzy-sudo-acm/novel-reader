@@ -35,15 +35,15 @@ button {
 [data-theme='white'] {
   --bg: #ffffff;
   --fg: #1a1a1a;
-  --fg-dim: #8a8a8a;
+  --fg-dim: #646464;
   --bar-bg: rgba(250, 250, 250, 0.96);
   --bar-border: #e5e5e5;
-  --accent: #b8860b;
+  --accent: #866000;
 }
 [data-theme='sepia'] {
   --bg: #f5efe0;
   --fg: #3d3225;
-  --fg-dim: #98896f;
+  --fg-dim: #74634b;
   --bar-bg: rgba(245, 239, 224, 0.96);
   --bar-border: #ddd2b8;
   --accent: #8a6d2f;
@@ -51,7 +51,7 @@ button {
 [data-theme='dark'] {
   --bg: #111214;
   --fg: #c9c9ce;
-  --fg-dim: #6a6a70;
+  --fg-dim: #99999f;
   --bar-bg: rgba(17, 18, 20, 0.96);
   --bar-border: #2a2b2e;
   --accent: #d0a94e;
@@ -78,6 +78,7 @@ button {
 }
 
 .import-btn {
+  min-height: 44px;
   padding: 8px 16px;
   border-radius: 20px;
   background: #1a1a1a;
@@ -85,7 +86,7 @@ button {
   font-size: 14px;
   cursor: pointer;
 }
-.import-btn.disabled {
+.import-btn:disabled {
   opacity: 0.5;
 }
 
@@ -144,6 +145,7 @@ button {
 }
 
 .book-main {
+  min-width: 0;
   flex: 1;
   text-align: left;
   padding: 16px;
@@ -159,7 +161,7 @@ button {
 
 .book-meta {
   font-size: 13px;
-  color: #999;
+  color: #686868;
 }
 
 .book-cur {
@@ -172,7 +174,7 @@ button {
 
 .book-cta {
   font-size: 14px;
-  color: #b8860b;
+  color: #866000;
   margin-top: 2px;
 }
 
@@ -204,6 +206,8 @@ button {
 }
 
 .content {
+  max-width: 780px;
+  margin-inline: auto;
   position: relative;
   /* 顶部：仅避让状态栏/灵动岛（PWA 下 env 才有值），不额外留大空白 */
   padding-top: calc(env(safe-area-inset-top) + 24px);
@@ -225,8 +229,9 @@ button {
   margin: 1.6em 0 1.2em;
   color: var(--fg);
 }
-section:first-child .ch-title {
-  margin-top: 0.4em;
+.chapter {
+  /* 隔离标题/段落的 margin，确保回收时的占位高度与章节实际占高相同。 */
+  display: flow-root;
 }
 
 .paras p {
@@ -328,6 +333,7 @@ section:first-child .ch-title {
 
 /* ---------- 浮层（目录 / 设置，fixed 全屏） ---------- */
 .overlay {
+  overscroll-behavior: contain;
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
@@ -336,6 +342,7 @@ section:first-child .ch-title {
 }
 
 .sheet {
+  min-height: 0;
   background: var(--bg);
   color: var(--fg);
   display: flex;
@@ -367,11 +374,12 @@ section:first-child .ch-title {
   border-radius: 8px;
   background: transparent;
   color: var(--fg);
-  font-size: 15px;
-  outline: none;
+  font-size: 16px;
+  min-width: 0;
 }
 
 .toc-list {
+  overscroll-behavior: contain;
   flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
@@ -405,6 +413,9 @@ section:first-child .ch-title {
 }
 
 .settings-sheet {
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   margin-top: auto;
   width: 100%;
   border-radius: 16px 16px 0 0;
@@ -426,6 +437,7 @@ section:first-child .ch-title {
 }
 
 .setting-row input[type='range'] {
+  min-width: 0;
   flex: 1;
   accent-color: var(--accent);
 }
@@ -436,6 +448,8 @@ section:first-child .ch-title {
 }
 
 .seg button {
+  min-height: 44px;
+  min-width: 44px;
   padding: 6px 14px;
   border-radius: 16px;
   border: 1px solid var(--bar-border);
@@ -454,4 +468,34 @@ section:first-child .ch-title {
   .content {
     padding-top: calc(env(safe-area-inset-top) + 12px);
   }
+}
+
+button:focus-visible, input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+button:disabled { cursor: default; }
+.reader-menu-access {
+  position: fixed;
+  top: -100px;
+  left: 12px;
+  z-index: 50;
+  padding: 12px;
+  background: var(--bg);
+}
+.reader-menu-access:focus { top: calc(env(safe-area-inset-top) + 8px); }
+.reader-error {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom) + 60px);
+  padding: 16px;
+  background: var(--bg);
+  border: 1px solid var(--bar-border);
+  z-index: 50;
+}
+@media (max-width: 359px) {
+  .setting-row { padding-inline: 12px; gap: 8px; }
+  .seg { gap: 4px; }
+  .seg button { padding-inline: 10px; }
 }

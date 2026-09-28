@@ -1,4 +1,5 @@
 import type { BookMeta } from '../types';
+import { useRef } from 'react';
 
 interface Props {
   books: BookMeta[];
@@ -15,18 +16,22 @@ function progressPercent(book: BookMeta): string {
   let before = 0;
   for (let i = 0; i < Math.min(p.chapterIndex, book.toc.length); i++) before += book.toc[i].c;
   const entry = book.toc[p.chapterIndex];
-  const inChapter = entry ? Math.min(1, p.paragraphIndex / Math.max(1, entry.p)) * entry.c : 0;
+  const inChapter = entry ? Math.min(1, (p.paragraphIndex + p.paragraphProgress) / Math.max(1, entry.p)) * entry.c : 0;
   return Math.min(100, ((before + inChapter) / Math.max(1, book.totalChars)) * 100).toFixed(1);
 }
 
 export default function Bookshelf({ books, importing, onImport, onOpen, onDelete }: Props) {
+  const fileRef = useRef<HTMLInputElement>(null);
   return (
     <div className="shelf">
       <header className="shelf-head">
         <h1>书架</h1>
-        <label className={`import-btn${importing ? ' disabled' : ''}`}>
+        <button className="import-btn" disabled={!!importing} onClick={() => fileRef.current?.click()}>
           {importing ? '导入中…' : '导入小说'}
+        </button>
           <input
+            ref={fileRef}
+            aria-label="选择小说 JSON 文件"
             type="file"
             accept=".json,application/json"
             style={{ display: 'none' }}
@@ -37,7 +42,6 @@ export default function Bookshelf({ books, importing, onImport, onOpen, onDelete
               e.target.value = '';
             }}
           />
-        </label>
       </header>
 
       {importing && (
@@ -63,7 +67,7 @@ export default function Bookshelf({ books, importing, onImport, onOpen, onDelete
           const curTitle = p && b.toc[p.chapterIndex] ? b.toc[p.chapterIndex].t : null;
           return (
             <li className="book-item" key={b.id}>
-              <button className="book-main" onClick={() => onOpen(b.id)}>
+              <button className="book-main" disabled={!!importing} onClick={() => onOpen(b.id)}>
                 <div className="book-title">{b.title}</div>
                 <div className="book-meta">
                   共 {b.chapterCount} 章 · 已读 {progressPercent(b)}%
@@ -73,6 +77,7 @@ export default function Bookshelf({ books, importing, onImport, onOpen, onDelete
               </button>
               <button
                 className="book-del"
+                disabled={!!importing}
                 onClick={() => {
                   if (window.confirm(`删除《${b.title}》？本地数据将被清除。`)) onDelete(b.id);
                 }}

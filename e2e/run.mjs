@@ -34,11 +34,10 @@ async function waitForServer(url, timeout = 30000) {
   throw new Error('preview server 启动超时');
 }
 
-const npx = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-const server = spawn(npx, ['vite', 'preview', '--port', String(PORT), '--strictPort'], {
+const server = spawn(process.execPath, [path.join(ROOT, 'node_modules/vite/bin/vite.js'), 'preview', '--port', String(PORT), '--strictPort'], {
   cwd: ROOT,
   stdio: 'ignore',
-  shell: process.platform === 'win32',
+  windowsHide: true,
 });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -57,18 +56,18 @@ async function readProg(page) {
 /** 当前参考线（视口 33%）处的段落定位 */
 async function paraAtRef(page) {
   return page.evaluate(() => {
-    const refY = window.scrollY + window.innerHeight * 0.33;
+    const refY = window.innerHeight * 0.33;
     const secs = [...document.querySelectorAll('section[data-idx]')];
     let cur = secs[0];
     for (const sec of secs) {
-      if (sec.offsetTop <= refY) cur = sec;
+      if (sec.getBoundingClientRect().top <= refY) cur = sec;
       else break;
     }
     if (!cur) return null;
     const paras = cur.querySelector('.paras').children;
     let p = 0;
     for (let k = 0; k < paras.length; k++) {
-      if (paras[k].offsetTop <= refY) p = k;
+      if (paras[k].getBoundingClientRect().top <= refY) p = k;
       else break;
     }
     return { chapter: Number(cur.dataset.idx), para: p };

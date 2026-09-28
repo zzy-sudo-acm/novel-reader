@@ -4,6 +4,7 @@ import { getBook, getChapter, readSavedProgress, saveBookProgress } from '../db'
 import type { ReaderSettings } from '../settings';
 import Toc from './Toc';
 import SettingsSheet from './SettingsSheet';
+import { getScrollTop, scrollToY } from '../scroll';
 
 interface ChapterData {
   index: number;
@@ -18,8 +19,9 @@ interface Props {
   onExit: () => void;
 }
 
-/** 最多同时渲染的章节数（windowing） */
+/** 至少保留的章节数；短章节还必须满足像素缓冲区，不能强行裁到六章。 */
 const KEEP = 6;
+const READING_LINE = 0.33;
 /** 向下/向上预加载的缓冲区（视口高度倍数） */
 const BUFFER_DOWN = 3;
 const BUFFER_UP = 2;
@@ -37,34 +39,45 @@ function prefixSums(arr: number[]): number[] {
   return out;
 }
 
-/** 使用原生文档滚动（iOS Safari 地址栏才能随滚动收起、底部不被遮挡） */
-function getScrollTop(): number {
-  return window.scrollY || document.documentElement.scrollTop || 0;
-}
-
 function getViewH(): number {
   return window.innerHeight;
 }
 
-function scrollToY(y: number) {
-  window.scrollTo(0, Math.max(0, y));
+function documentTop(el: HTMLElement): number {
+  return el.getBoundingClientRect().top + getScrollTop();
 }
 
 export default function Reader({ bookId, settings, onSettingsChange, onExit }: Props) {
   const bookRef = useRef<BookMeta | null>(null);
   const [book, setBook] = useState<BookMeta | null>(null);
   const [ready, setReady] = useState(false);
-  const [renderTick, forceRender] = useReducer((x: number) => x + 1, 0);
+  const [, forceRender] = useReducer((x: number) => x + 1, 0);
+  const [error, setError] = useState<string | null>(null);
+  const [percent, setPercent] = useState(0);
 
   const indicesRef = useRef<number[]>([]);
   const cacheRef = useRef(new Map<number, ChapterData>());
   const sectionEls = useRef(new Map<number, HTMLElement>());
-  /** 每章段落的绝对 offsetTop（相对 .content 容器，其位于文档顶部） */
+  /** 当前布局中每章段落的逻辑文档坐标，包含已回收章节的等高占位。 */
   const offsetsRef = useRef(new Map<number, number[]>());
   const pendingAnchorRef = useRef<{ chapter: number; para: number; top: number } | null>(null);
   const pendingScrollRef = useRef<{ chapter: number; para: number; ratio: number } | null>(null);
   const progressRef = useRef({ chapter: 0, para: 0, ratio: 0 });
   const prefixCharsRef = useRef<number[]>([0]);
+  const topSpaceRef = useRef(0);
+  const bottomSpaceRef = useRef(0);
+  const heightsRef = useRef(new Map<number, number>());
+  const generationRef = useRef(0);
+  const activeRef = useRef(false);
+  const initializedRef = useRef(false);
+  const errorRef = useRef(false);
+  const overlayRef = useRef<'none' | 'toc' | 'settings'>('none');
+  const touchingRef = useRef(false);
+  const lastScrollRef = useRef(0);
+  const idleTimerRef = useRef(0);
+  const hintTimerRef = useRef(0);
+  const syncRafRef = useRef(0);
+  const gestureRef = useRef<{ id: number; x: number; y: number; scroll: number; time: number; valid: boolean } | null>(null);
 
   const [current, setCurrent] = useState(0);
   const currentRef = useRef(0);
@@ -79,19 +92,33 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   const saveTimerRef = useRef(0);
   const prevSettingsRef = useRef(settings);
 
+  function fail(e: unknown) {
+    if (!activeRef.current) return;
+    errorRef.current = true;
+    setError(e instanceof Error ? e.message : '章节加载失败，请返回书架后重试');
+  }
+
+  function scrolling() { return touchingRef.current || performance.now() - lastScrollRef.current < 220; }
+
+  function waitForIdle() {
+    window.clearTimeout(idleTimerRef.current);
+    idleTimerRef.current = window.setTimeout(() => { if (!touchingRef.current) scheduleSync(); }, 250);
+  }
+
   // ---------- 数据加载 ----------
 
   async function loadChapter(i: number): Promise<ChapterData | null> {
+    const generation = generationRef.current;
     const cached = cacheRef.current.get(i);
     if (cached) return cached;
     const rec = await getChapter(bookId, i);
-    if (!rec) return null;
+    if (!rec) throw new Error(`第 ${i + 1} 章正文缺失，请重新导入完整书籍`);
     const data: ChapterData = { index: i, title: rec.title, paragraphs: splitParagraphs(rec.content) };
-    cacheRef.current.set(i, data);
+    if (activeRef.current && generation === generationRef.current) cacheRef.current.set(i, data);
     return data;
   }
 
-  // ---------- 测量工具（offsetTop 均相对 .content 容器，等价于文档坐标） ----------
+  // ---------- 测量工具（弹层锁定 body 时也使用同一文档坐标） ----------
 
   function getOffsets(idx: number): number[] {
     let o = offsetsRef.current.get(idx);
@@ -102,7 +129,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
         const paras = sec.querySelector('.paras');
         if (paras) {
           for (let k = 0; k < paras.children.length; k++) {
-            o.push((paras.children[k] as HTMLElement).offsetTop);
+            o.push(documentTop(paras.children[k] as HTMLElement));
           }
         }
       }
@@ -123,11 +150,11 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     for (const idx of indicesRef.current) {
       const sec = sectionEls.current.get(idx);
       if (!sec) continue;
-      if (sec.offsetTop + sec.offsetHeight <= y) continue;
+      if (documentTop(sec) + sec.offsetHeight <= y) continue;
       const offs = getOffsets(idx);
       let p = 0;
       for (let k = 0; k < offs.length; k++) {
-        const h = k + 1 < offs.length ? offs[k + 1] - offs[k] : 40;
+        const h = paragraphHeight(idx, k, offs);
         if (offs[k] + h > y) {
           p = k;
           break;
@@ -139,31 +166,42 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     }
   }
 
+  function paragraphHeight(chapter: number, para: number, offsets = getOffsets(chapter)) {
+    return Math.max(1, para + 1 < offsets.length
+      ? offsets[para + 1] - offsets[para]
+      : paraElement(chapter, para)?.offsetHeight ?? 40);
+  }
+
   function scrollToPara(chapter: number, para: number, ratio: number) {
     const sec = sectionEls.current.get(chapter);
     if (!sec) return;
     const offs = getOffsets(chapter);
     if (offs.length === 0) {
-      scrollToY(sec.offsetTop);
+      scrollToY(documentTop(sec));
       return;
     }
     const p = Math.max(0, Math.min(para, offs.length - 1));
-    const h = p + 1 < offs.length ? offs[p + 1] - offs[p] : 40;
-    scrollToY(offs[p] + ratio * h - getViewH() * 0.2);
+    const h = paragraphHeight(chapter, p, offs);
+    scrollToY(offs[p] + ratio * h - getViewH() * READING_LINE);
   }
 
   // ---------- 窗口滑动（核心） ----------
 
   async function grow(dir: 'append' | 'prepend', i: number) {
+    const generation = generationRef.current;
     const data = await loadChapter(i);
-    if (!data) return;
+    if (!data || !activeRef.current || generation !== generationRef.current) return;
+    // 前插未渲染内容可能改变高度，只在手指和惯性均停止后锚定。
+    if (dir === 'prepend' && scrolling()) { waitForIdle(); return; }
     const idxs = indicesRef.current;
     if (dir === 'append') {
       if (idxs[idxs.length - 1] !== i - 1) return;
+      bottomSpaceRef.current = Math.max(0, bottomSpaceRef.current - (heightsRef.current.get(i) ?? 0));
       indicesRef.current = [...idxs, i];
     } else {
       if (idxs[0] !== i + 1) return;
       captureAnchor();
+      topSpaceRef.current = Math.max(0, topSpaceRef.current - (heightsRef.current.get(i) ?? 0));
       indicesRef.current = [i, ...idxs];
     }
     forceRender();
@@ -171,13 +209,28 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   function trim() {
     const idxs = indicesRef.current;
-    if (idxs.length <= KEEP) return;
-    const cur = currentRef.current;
-    const excess = idxs.length - KEEP;
-    const cutAbove = Math.min(excess, idxs.filter((i) => i < cur - 1).length);
-    const cutBelow = Math.min(excess - cutAbove, idxs.filter((i) => i > cur + 1).length);
+    if (idxs.length <= KEEP || scrolling()) return;
+    const y = getScrollTop();
+    const h = getViewH();
+    let cutAbove = 0;
+    let cutBelow = 0;
+    while (idxs.length - cutAbove > KEEP) {
+      const sec = sectionEls.current.get(idxs[cutAbove]);
+      if (!sec || documentTop(sec) + sec.offsetHeight >= y - h * (BUFFER_UP + 1)) break;
+      heightsRef.current.set(idxs[cutAbove], sec.getBoundingClientRect().height);
+      topSpaceRef.current += sec.getBoundingClientRect().height;
+      cutAbove++;
+    }
+    while (idxs.length - cutAbove - cutBelow > KEEP) {
+      const index = idxs[idxs.length - 1 - cutBelow];
+      const sec = sectionEls.current.get(index);
+      if (!sec || documentTop(sec) <= y + h * (BUFFER_DOWN + 2)) break;
+      heightsRef.current.set(index, sec.getBoundingClientRect().height);
+      bottomSpaceRef.current += sec.getBoundingClientRect().height;
+      cutBelow++;
+    }
     if (cutAbove <= 0 && cutBelow <= 0) return;
-    if (cutAbove > 0) captureAnchor();
+    // 用等高占位保留文档坐标；向下阅读时不再 scrollTo 补偿几千像素。
     const removed = [...idxs.slice(0, cutAbove), ...idxs.slice(idxs.length - cutBelow)];
     indicesRef.current = idxs.slice(cutAbove, idxs.length - cutBelow);
     for (const i of removed) {
@@ -189,6 +242,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   /** 单步同步：append / prepend / trim 一次，之后由 layout effect 继续调度直到收敛 */
   async function step() {
+    if (!activeRef.current || !initializedRef.current || errorRef.current || overlayRef.current !== 'none' || pendingScrollRef.current) return;
     const b = bookRef.current;
     if (!b) return;
     const idxs = indicesRef.current;
@@ -201,11 +255,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     const viewTop = getScrollTop();
     const viewH = getViewH();
 
-    if (last < b.chapterCount - 1 && lastSec.offsetTop + lastSec.offsetHeight < viewTop + viewH * BUFFER_DOWN) {
+    if (last < b.chapterCount - 1 && documentTop(lastSec) + lastSec.offsetHeight < viewTop + viewH * BUFFER_DOWN) {
       await grow('append', last + 1);
       return;
     }
-    if (first > 0 && firstSec.offsetTop > viewTop - viewH * BUFFER_UP) {
+    if (first > 0 && documentTop(firstSec) > viewTop - viewH * BUFFER_UP) {
+      if (scrolling()) { waitForIdle(); return; }
       await grow('prepend', first - 1);
       return;
     }
@@ -213,16 +268,16 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   }
 
   function scheduleSync() {
-    if (syncScheduledRef.current) return;
+    if (!activeRef.current || syncScheduledRef.current) return;
     syncScheduledRef.current = true;
-    requestAnimationFrame(() => {
+    syncRafRef.current = requestAnimationFrame(() => {
       syncScheduledRef.current = false;
       if (syncingRef.current) {
         needSyncRef.current = true;
         return;
       }
       syncingRef.current = true;
-      void step().finally(() => {
+      void step().catch(fail).finally(() => {
         syncingRef.current = false;
         if (needSyncRef.current) {
           needSyncRef.current = false;
@@ -235,13 +290,14 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   // ---------- 当前章节与进度 ----------
 
   function updateCurrent() {
-    const refY = getScrollTop() + getViewH() * 0.33;
+    if (!initializedRef.current || pendingScrollRef.current) return;
+    const refY = getScrollTop() + getViewH() * READING_LINE;
     const idxs = indicesRef.current;
     if (idxs.length === 0) return;
     let cur = idxs[0];
     for (const i of idxs) {
       const sec = sectionEls.current.get(i);
-      if (sec && sec.offsetTop <= refY) cur = i;
+      if (sec && documentTop(sec) <= refY) cur = i;
       else break;
     }
     let para = 0;
@@ -250,12 +306,19 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     for (let k = offs.length - 1; k >= 0; k--) {
       if (offs[k] <= refY) {
         para = k;
-        const h = k + 1 < offs.length ? offs[k + 1] - offs[k] : 40;
+        const h = paragraphHeight(cur, k, offs);
         ratio = Math.min(1, Math.max(0, (refY - offs[k]) / (h || 40)));
         break;
       }
     }
     progressRef.current = { chapter: cur, para, ratio };
+    const b = bookRef.current;
+    const entry = b?.toc[cur];
+    if (b && entry) {
+      const fraction = Math.min(1, (para + ratio) / Math.max(1, entry.p));
+      const next = ((prefixCharsRef.current[cur] ?? 0) + fraction * entry.c) / Math.max(1, b.totalChars) * 100;
+      setPercent(Math.round(Math.min(100, next) * 10) / 10);
+    }
     if (cur !== currentRef.current) {
       currentRef.current = cur;
       setCurrent(cur);
@@ -270,7 +333,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   function saveNow() {
     const b = bookRef.current;
-    if (!b) return;
+    if (!b || !initializedRef.current) return;
     const p = progressRef.current;
     void saveBookProgress(b.id, {
       chapterIndex: p.chapter,
@@ -282,9 +345,13 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   // ---------- 渲染后：应用待处理的滚动补偿 / 定位 ----------
 
   useLayoutEffect(() => {
-    if (prevSettingsRef.current !== settings) {
-      prevSettingsRef.current = settings;
-      offsetsRef.current.clear();
+    overlayRef.current = overlay;
+    // 字体、窗口结构变化都会改变坐标。只缓存当前这次布局。
+    offsetsRef.current.clear();
+    const previous = prevSettingsRef.current;
+    prevSettingsRef.current = settings;
+    if (previous.fontSize !== settings.fontSize || previous.lineHeight !== settings.lineHeight ||
+        previous.margin !== settings.margin || previous.fontFamily !== settings.fontFamily) {
       if (bookRef.current && !pendingScrollRef.current) {
         const p = progressRef.current;
         pendingScrollRef.current = { chapter: p.chapter, para: p.para, ratio: p.ratio };
@@ -308,6 +375,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
         if (Math.abs(delta) > 0.5) scrollToY(getScrollTop() + delta);
       }
     }
+    if (initializedRef.current) updateCurrent();
     scheduleSync();
   });
 
@@ -315,9 +383,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   useEffect(() => {
     let cancelled = false;
+    activeRef.current = true;
+    const generation = ++generationRef.current;
     (async () => {
       const b = await getBook(bookId);
-      if (!b || cancelled) return;
+      if (cancelled) return;
+      if (!b) throw new Error('书籍不存在，请返回书架重新导入');
       bookRef.current = b;
       setBook(b);
       prefixCharsRef.current = prefixSums(b.toc.map((t) => t.c));
@@ -325,29 +396,34 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
       const start = Math.max(0, Math.min(saved.chapterIndex, b.chapterCount - 1));
       const lo = Math.max(0, start - 1);
       const hi = Math.min(b.chapterCount - 1, start + 2);
-      const arr: number[] = [];
-      for (let i = lo; i <= hi; i++) {
-        await loadChapter(i);
-        arr.push(i);
-      }
-      if (cancelled) return;
+      const arr = Array.from({ length: hi - lo + 1 }, (_, i) => lo + i);
+      await Promise.all(arr.map(loadChapter));
+      if (cancelled || generation !== generationRef.current) return;
       indicesRef.current = arr;
       currentRef.current = start;
       setCurrent(start);
       progressRef.current = { chapter: start, para: saved.paragraphIndex, ratio: saved.paragraphProgress };
       pendingScrollRef.current = { chapter: start, para: saved.paragraphIndex, ratio: saved.paragraphProgress };
+      initializedRef.current = true;
       setReady(true);
       forceRender();
       // 首次进入时控制栏默认可见，并短暂提示操作方式
       setBarsVisible(true);
       setShowHint(true);
-      window.setTimeout(() => {
+      hintTimerRef.current = window.setTimeout(() => {
         setShowHint(false);
         setBarsVisible(false);
       }, 4000);
-    })();
+    })().catch((e) => { if (!cancelled) fail(e); });
     return () => {
       cancelled = true;
+      activeRef.current = false;
+      generationRef.current++;
+      window.clearTimeout(hintTimerRef.current);
+      window.clearTimeout(idleTimerRef.current);
+      cancelAnimationFrame(rafRef.current);
+      cancelAnimationFrame(syncRafRef.current);
+      syncScheduledRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookId]);
@@ -356,9 +432,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   useEffect(() => {
     const onVis = () => {
-      if (document.visibilityState === 'hidden') saveNow();
+      if (document.visibilityState === 'hidden') { updateCurrent(); saveNow(); }
     };
-    const onPageHide = () => saveNow();
+    const onPageHide = () => { updateCurrent(); saveNow(); };
     document.addEventListener('visibilitychange', onVis);
     window.addEventListener('pagehide', onPageHide);
     window.addEventListener('beforeunload', onPageHide);
@@ -375,8 +451,20 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   // 原生文档滚动监听
   useEffect(() => {
     const h = () => onScroll();
+    const touch = (e: TouchEvent) => {
+      touchingRef.current = e.touches.length > 0;
+      if (!touchingRef.current) waitForIdle();
+    };
     window.addEventListener('scroll', h, { passive: true });
-    return () => window.removeEventListener('scroll', h);
+    window.addEventListener('touchstart', touch, { passive: true });
+    window.addEventListener('touchend', touch, { passive: true });
+    window.addEventListener('touchcancel', touch, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', h);
+      window.removeEventListener('touchstart', touch);
+      window.removeEventListener('touchend', touch);
+      window.removeEventListener('touchcancel', touch);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -388,10 +476,12 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     const onResize = () => {
       if (window.innerWidth === w) return;
       w = window.innerWidth;
+      const p = { ...progressRef.current };
+      // 先冻结锚点，避免 resize 之后的 scroll 事件把旧进度替换掉。
+      pendingScrollRef.current = p;
       window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         offsetsRef.current.clear();
-        const p = progressRef.current;
         pendingScrollRef.current = { chapter: p.chapter, para: p.para, ratio: p.ratio };
         forceRender();
       }, 150);
@@ -406,6 +496,8 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   }, [ready]);
 
   function onScroll() {
+    lastScrollRef.current = performance.now();
+    waitForIdle();
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = 0;
@@ -421,14 +513,19 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     const b = bookRef.current;
     if (!b) return;
     setOverlay('none');
+    const generation = ++generationRef.current;
+    errorRef.current = false;
+    setError(null);
     const target = Math.max(0, Math.min(i, b.chapterCount - 1));
     const lo = Math.max(0, target - 1);
     const hi = Math.min(b.chapterCount - 1, target + 2);
-    const arr: number[] = [];
-    for (let k = lo; k <= hi; k++) {
-      await loadChapter(k);
-      arr.push(k);
-    }
+    const arr = Array.from({ length: hi - lo + 1 }, (_, k) => lo + k);
+    try { await Promise.all(arr.map(loadChapter)); } catch (e) { fail(e); return; }
+    if (!activeRef.current || generation !== generationRef.current) return;
+    topSpaceRef.current = 0;
+    bottomSpaceRef.current = 0;
+    heightsRef.current.clear();
+    for (const key of cacheRef.current.keys()) if (!arr.includes(key)) cacheRef.current.delete(key);
     offsetsRef.current.clear();
     indicesRef.current = arr;
     pendingAnchorRef.current = null;
@@ -441,6 +538,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   }
 
   function handleBack() {
+    updateCurrent();
     saveNow();
     onExit();
   }
@@ -448,13 +546,6 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   // ---------- 渲染 ----------
 
   const b = book;
-  const totalChars = b?.totalChars ?? 1;
-  const prefix = prefixCharsRef.current;
-  const curEntry = b?.toc[current];
-  const chapterChars = curEntry?.c ?? 1;
-  const chapterParas = Math.max(1, curEntry?.p ?? 1);
-  const inChapter = Math.min(1, (progressRef.current.para + progressRef.current.ratio) / chapterParas);
-  const percent = b ? Math.min(100, ((prefix[current] ?? 0) + inChapter * chapterChars) / totalChars * 100) : 0;
 
   return (
     <div
@@ -471,18 +562,42 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
         } as React.CSSProperties
       }
     >
+      <button className="reader-menu-access" onClick={() => setBarsVisible(true)}>显示阅读菜单</button>
       <div
         className="content"
-        onClick={() => {
-          if (overlay === 'none') setBarsVisible((v) => !v);
+        onPointerDown={(e) => {
+          if (!e.isPrimary) { if (gestureRef.current) gestureRef.current.valid = false; return; }
+          gestureRef.current = { id: e.pointerId, x: e.clientX, y: e.clientY, scroll: getScrollTop(), time: performance.now(), valid: !scrolling() };
+        }}
+        onPointerMove={(e) => {
+          const g = gestureRef.current;
+          if (g && (Math.abs(g.x - e.clientX) > 8 || Math.abs(g.y - e.clientY) > 8)) g.valid = false;
+        }}
+        onPointerUp={() => waitForIdle()}
+        onPointerCancel={() => {
+          if (gestureRef.current) gestureRef.current.valid = false;
+          waitForIdle();
+        }}
+        onClick={(e) => {
+          const g = gestureRef.current;
+          if (overlay === 'none' && g?.valid && performance.now() - g.time < 500 &&
+              Math.abs(getScrollTop() - g.scroll) < 4 && e.clientX > window.innerWidth * .15 &&
+              e.clientX < window.innerWidth * .85 && e.clientY > getViewH() * .15 && e.clientY < getViewH() * .85 &&
+              !window.getSelection()?.toString()) {
+            window.clearTimeout(hintTimerRef.current);
+            setShowHint(false);
+            setBarsVisible((v) => !v);
+          }
         }}
       >
+        <div aria-hidden="true" style={{ height: topSpaceRef.current }} />
         {ready &&
           indicesRef.current.map((i) => {
             const ch = cacheRef.current.get(i);
             if (!ch) return null;
             return (
               <section
+                className="chapter"
                 key={i}
                 data-idx={i}
                 ref={(el) => {
@@ -499,6 +614,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
               </section>
             );
           })}
+        <div aria-hidden="true" style={{ height: bottomSpaceRef.current }} />
         {ready && indicesRef.current.length > 0 && b && indicesRef.current[indicesRef.current.length - 1] >= b.chapterCount - 1 && (
           <div className="book-end">全书完</div>
         )}
@@ -534,7 +650,8 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
         <SettingsSheet settings={settings} onChange={onSettingsChange} onClose={() => setOverlay('none')} />
       )}
 
-      {!ready && <div className="loading">加载中…</div>}
+      {error && <div className="reader-error" role="alert"><p>{error}</p><button className="bar-btn" onClick={handleBack}>返回书架</button></div>}
+      {!ready && !error && <div className="loading">加载中…</div>}
 
       {ready && showHint && overlay === 'none' && (
         <div className="tap-hint">轻点屏幕中央可显示 / 隐藏菜单（目录、设置）</div>

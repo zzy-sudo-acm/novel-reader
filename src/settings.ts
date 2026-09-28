@@ -23,7 +23,18 @@ export const DEFAULT_SETTINGS: ReaderSettings = {
 export function loadSettings(): ReaderSettings {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...DEFAULT_SETTINGS, ...(JSON.parse(raw) as Partial<ReaderSettings>) };
+    if (raw) {
+      const s = JSON.parse(raw) as Partial<ReaderSettings>;
+      const number = (v: unknown, fallback: number, lo: number, hi: number) =>
+        typeof v === 'number' && Number.isFinite(v) ? Math.max(lo, Math.min(hi, v)) : fallback;
+      return {
+        fontSize: number(s.fontSize, 18, 14, 28),
+        lineHeight: number(s.lineHeight, 1.8, 1.4, 2.4),
+        margin: number(s.margin, 20, 8, 40),
+        fontFamily: s.fontFamily === 'sans' ? 'sans' : 'serif',
+        theme: s.theme === 'white' || s.theme === 'dark' ? s.theme : 'sepia',
+      };
+    }
   } catch {
     /* ignore */
   }

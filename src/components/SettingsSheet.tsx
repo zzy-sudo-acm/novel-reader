@@ -1,4 +1,5 @@
 import type { ReaderSettings, Theme } from '../settings';
+import Sheet from './Sheet';
 
 interface Props {
   settings: ReaderSettings;
@@ -16,8 +17,7 @@ export default function SettingsSheet({ settings, onChange, onClose }: Props) {
   const set = (patch: Partial<ReaderSettings>) => onChange({ ...settings, ...patch });
 
   return (
-    <div className="overlay" onClick={onClose}>
-      <div className="sheet settings-sheet" onClick={(e) => e.stopPropagation()}>
+    <Sheet label="阅读设置" className="settings-sheet" onClose={onClose}>
         <div className="sheet-head">
           <span>阅读设置</span>
           <button className="bar-btn" onClick={onClose}>
@@ -66,12 +66,14 @@ export default function SettingsSheet({ settings, onChange, onClose }: Props) {
           <div className="seg">
             <button
               className={settings.fontFamily === 'serif' ? 'seg-on' : ''}
+              aria-pressed={settings.fontFamily === 'serif'}
               onClick={() => set({ fontFamily: 'serif' })}
             >
               衬线
             </button>
             <button
               className={settings.fontFamily === 'sans' ? 'seg-on' : ''}
+              aria-pressed={settings.fontFamily === 'sans'}
               onClick={() => set({ fontFamily: 'sans' })}
             >
               黑体
@@ -86,6 +88,7 @@ export default function SettingsSheet({ settings, onChange, onClose }: Props) {
               <button
                 key={t.key}
                 className={settings.theme === t.key ? 'seg-on' : ''}
+                aria-pressed={settings.theme === t.key}
                 onClick={() => set({ theme: t.key })}
               >
                 {t.label}
@@ -93,7 +96,6 @@ export default function SettingsSheet({ settings, onChange, onClose }: Props) {
             ))}
           </div>
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }

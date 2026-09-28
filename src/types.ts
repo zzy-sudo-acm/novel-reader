@@ -22,6 +22,8 @@ export interface BookMeta {
   totalChars: number;
   addedAt: number;
   progress?: ReadingProgress;
+  /** 与同步进度镜像比较新旧；无进度时也记录重置时间。 */
+  progressUpdatedAt?: number;
 }
 
 export interface ChapterRecord {

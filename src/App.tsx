@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { BookMeta } from './types';
-import { deleteBook, getAllBooks } from './db';
+import { deleteBook, getAllBooks, readSavedProgress } from './db';
 import { importBookFile } from './importer';
 import { loadSettings, saveSettings, type ReaderSettings } from './settings';
 import Bookshelf from './components/Bookshelf';
@@ -14,11 +14,16 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    setBooks(await getAllBooks());
+    const items = await getAllBooks();
+    setBooks(await Promise.all(items.map(async (book) => {
+      const progress = await readSavedProgress(book);
+      const started = book.progress || progress.chapterIndex || progress.paragraphIndex || progress.paragraphProgress;
+      return { ...book, progress: started ? progress : undefined };
+    })));
   }, []);
 
   useEffect(() => {
-    void refresh();
+    void refresh().catch(() => setError('无法读取本地书架，请确认浏览器允许本地存储后刷新重试'));
   }, [refresh]);
 
   // 主题挂到 <html>，使 body 背景覆盖 Safari 工具栏/橡皮筋/PWA 全屏区域
@@ -46,8 +51,8 @@ export default function App() {
 
   const handleDelete = useCallback(
     async (id: string) => {
-      await deleteBook(id);
-      await refresh();
+      try { await deleteBook(id); await refresh(); }
+      catch { setError('删除失败，请稍后重试'); }
     },
     [refresh],
   );
@@ -61,12 +66,13 @@ export default function App() {
     <div className="app">
       {openBookId ? (
         <Reader
+          key={openBookId}
           bookId={openBookId}
           settings={settings}
           onSettingsChange={handleSettingsChange}
           onExit={() => {
             setOpenBookId(null);
-            void refresh();
+            void refresh().catch(() => setError('书架刷新失败，请刷新页面重试'));
           }}
         />
       ) : (
@@ -79,7 +85,7 @@ export default function App() {
             onDelete={handleDelete}
           />
           {error && (
-            <div className="error-toast" onClick={() => setError(null)}>
+            <div className="error-toast" role="alert" onClick={() => setError(null)}>
               {error}
             </div>
           )}

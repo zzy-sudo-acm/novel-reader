@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TocEntry } from '../types';
+import Sheet from './Sheet';
 
 interface Props {
   toc: TocEntry[];
@@ -42,14 +43,18 @@ export default function Toc({ toc, current, onClose, onSelect }: Props) {
   const end = Math.min(items.length, Math.ceil((scrollTop + viewH) / ROW_H) + OVERSCAN);
 
   return (
-    <div className="overlay">
-      <div className="sheet toc-sheet">
+    <Sheet label="章节目录" className="toc-sheet" onClose={onClose}>
         <div className="sheet-head">
           <input
             className="toc-search"
             placeholder="搜索章节标题"
+            aria-label="搜索章节标题"
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setQ(e.target.value);
+              setScrollTop(0);
+              if (listRef.current) listRef.current.scrollTop = 0;
+            }}
           />
           <button className="bar-btn" onClick={onClose}>
             关闭
@@ -67,6 +72,7 @@ export default function Toc({ toc, current, onClose, onSelect }: Props) {
                 <button
                   key={x.i}
                   className={`toc-row${x.i === current ? ' toc-current' : ''}`}
+                  aria-current={x.i === current ? 'location' : undefined}
                   style={{ top: row * ROW_H, height: ROW_H }}
                   onClick={() => onSelect(x.i)}
                 >
@@ -77,7 +83,6 @@ export default function Toc({ toc, current, onClose, onSelect }: Props) {
           </div>
           {items.length === 0 && <div className="toc-empty">没有匹配的章节</div>}
         </div>
-      </div>
-    </div>
+    </Sheet>
   );
 }
