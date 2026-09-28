@@ -10,13 +10,19 @@ export interface TocEntry {
 export interface ReadingProgress {
   chapterIndex: number;
   paragraphIndex: number;
-  /** 0~1，参考线落在该段落内的相对位置 */
+  /** 0~1，参考线落在该段落内的相对高度位置（旧格式，保留作 fallback） */
   paragraphProgress: number;
+  /** 0~1，参考位置约位于该段落的字符比例；比高度比例更抗字号/行距变化 */
+  paragraphCharProgress?: number;
 }
 
 export interface BookMeta {
   id: string;
   title: string;
+  /** 书源标识，来自 book.json 的 source 字段 */
+  source?: string;
+  /** 无 source 时使用的内容指纹，用于识别同一本书 */
+  fingerprint?: string;
   chapterCount: number;
   toc: TocEntry[];
   totalChars: number;

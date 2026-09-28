@@ -175,9 +175,93 @@ try {
     return {restored,rollback,resetProgress,newFailed,books:all.length,total};
   });
   check('使用更新的同步进度镜像',data.restored.chapterIndex===50,data);
-  check('覆盖导入失败完整保留原书',data.rollback.failed&&data.rollback.count===205&&data.rollback.metadata===205&&data.rollback.last==='原文204',data);
+  check('失败导入不破坏已有书籍',data.rollback.failed&&data.rollback.count===205&&data.rollback.metadata===205&&data.rollback.last==='原文204',data);
   check('重置后不复活旧进度镜像',data.resetProgress.chapterIndex===0,data);
-  check('新书导入失败没有残留章节',data.newFailed&&data.books===1&&data.total===3,data);
+  // 新的书籍身份规则：同名但指纹不同视为不同书（205 章版与 3 章版共存），失败导入无残留
+  check('新书导入失败没有残留章节',data.newFailed&&data.books===2&&data.total===208,data);
+
+  // ===== 书籍身份 / 进度迁移 / 删除原子性 / 旧进度兼容 =====
+  const idPage=await (await browser.newContext()).newPage(); await idPage.goto(base);
+  const identity=await idPage.evaluate(async()=>{
+    const db=await import('/novel-reader/src/db.ts');
+    const {importBookFile}=await import('/novel-reader/src/importer.ts');
+    // 每章 5 段，保证 paragraphIndex=2 合法
+    const mk=(titles,title,source)=>new File([JSON.stringify({title,source,chapters:titles.map(t=>({title:t,content:Array.from({length:5},(_,p)=>`${t}第${p}段正文。`).join('\n\n')}))})],'b.json');
+    const titlesA=Array.from({length:30},(_,i)=>`第${i}章`);
+    // C: 同名不同 source → 两本共存，互不覆盖
+    const a=await importBookFile(mk(titlesA,'同名书','源A'),()=>{});
+    const bAlt=await importBookFile(mk(titlesA.slice(0,25),'同名书','源B'),()=>{});
+    const afterC=await db.getAllBooks();
+    const cOk=afterC.length===2&&a.id!==bAlt.id&&(await db.countChapters(a.id))===30&&(await db.countChapters(bAlt.id))===25;
+    // D: 相同 source 重导入 → 同一本书、进度保留
+    await db.saveBookProgress(a.id,{chapterIndex:10,paragraphIndex:2,paragraphProgress:.5,paragraphCharProgress:.5});
+    const a2=await importBookFile(mk(titlesA,'同名书','源A'),()=>{});
+    const progD=await db.readSavedProgress(await db.getBook(a.id));
+    const dOk=(await db.getAllBooks()).length===2&&a2.id===a.id&&progD.chapterIndex===10&&progD.paragraphIndex===2;
+    // E: 同书前面插入一章 → 进度按章节标题迁移 10 → 11
+    const a3=await importBookFile(mk(['新增序章',...titlesA],'同名书','源A'),()=>{});
+    const progE=await db.readSavedProgress(await db.getBook(a.id));
+    const eOk=a3.id===a.id&&(await db.getAllBooks()).length===2&&progE.chapterIndex===11&&progE.paragraphIndex===2;
+    // F: 删除原子性——books 删除失败时章节回滚；成功时全部清理
+    const origDelete=IDBObjectStore.prototype.delete;
+    IDBObjectStore.prototype.delete=function(key){if(this.name==='books')throw new Error('模拟 books 删除失败');return origDelete.call(this,key);};
+    let threw=false;
+    try{await db.deleteBook(bAlt.id);}catch{threw=true;}
+    IDBObjectStore.prototype.delete=origDelete;
+    const intact=(await db.countChapters(bAlt.id))===25&&!!(await db.getBook(bAlt.id));
+    await db.deleteBook(bAlt.id);
+    const cleaned=!(await db.getBook(bAlt.id))&&(await db.countChapters(bAlt.id))===0&&(await db.getAllBooks()).length===1;
+    const fOk=threw&&intact&&cleaned;
+    // A: 旧版进度（无 paragraphCharProgress）正常读取
+    const legacyBook=await importBookFile(mk(titlesA.slice(0,20),'旧进度书','源C'),()=>{});
+    const lb=await db.getBook(legacyBook.id);
+    localStorage.setItem(`nr:prog:${lb.id}`,JSON.stringify({chapterIndex:7,paragraphIndex:3,paragraphProgress:.4,updatedAt:Date.now()}));
+    const progA=await db.readSavedProgress(lb);
+    const aOk=progA.chapterIndex===7&&progA.paragraphIndex===3&&Math.abs(progA.paragraphProgress-.4)<1e-9;
+    // 同一本书覆盖导入中途失败 → 原书完整保留
+    let failThrew=false;
+    try{await importBookFile(mk(titlesA,'同名书','源A'),(_,stage)=>{if(stage.startsWith('写入章节'))throw new Error('模拟中断');});}catch{failThrew=true;}
+    const gOk=failThrew&&(await db.countChapters(a.id))===31&&(await db.getBook(a.id)).chapterCount===31&&(await db.getChapter(a.id,11))?.title==='第10章';
+    return {cOk,dOk,eOk,fOk,aOk,gOk};
+  });
+  check('同名不同源的书互不覆盖',identity.cOk,identity);
+  check('同源重导入保留身份与进度',identity.dOk,identity);
+  check('前插章节后进度按标题迁移',identity.eOk,identity);
+  check('删除失败整体回滚、删除成功全部清理',identity.fOk,identity);
+  check('旧版进度数据兼容恢复',identity.aOk,identity);
+  check('同书覆盖导入失败保留原书',identity.gOk,identity);
+
+  // ===== B: 字符级进度——改字号后回到原文同一文字附近 =====
+  const charPage=await (await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})).newPage();
+  await charPage.goto(base);
+  await upload(charPage,{title:'字符进度',chapters:Array.from({length:6},(_,i)=>({title:`长章${i}`,content:Array.from({length:5},(_,p)=>`第${i}章第${p}段。`+'验'.repeat(360)).join('\n\n')}))});
+  await charPage.locator('.book-main').click();
+  await charPage.waitForSelector('.paras p'); await sleep(600);
+  await charPage.evaluate(()=>{
+    const p=document.querySelector('section[data-idx="2"]').querySelectorAll('.paras p')[2];
+    window.scrollTo(0,p.getBoundingClientRect().top+scrollY+p.offsetHeight*.6-innerHeight*.33);
+  });
+  await sleep(700);
+  const charAt=()=>charPage.evaluate(()=>{
+    const r=document.caretRangeFromPoint(150,innerHeight*.33);
+    const p=r?.startContainer?.parentElement;
+    const sec=p?.closest('section');
+    if(!r||!p||!sec)return null;
+    return {chapter:+sec.dataset.idx,para:[...sec.querySelectorAll('p')].indexOf(p),offset:r.startOffset,len:p.textContent.length};
+  });
+  const c1=await charAt();
+  const savedProg=await progress(charPage);
+  check('进度包含字符比例字段',typeof savedProg?.paragraphCharProgress==='number',savedProg);
+  await showBars(charPage);
+  await charPage.getByRole('button',{name:'设置',exact:true}).click();
+  await charPage.locator('.settings-sheet input[type=range]').nth(0).evaluate(el=>{
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,'26');
+    el.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  await sleep(400);
+  await charPage.keyboard.press('Escape'); await sleep(500);
+  const c2=await charAt();
+  check('改字号后字符级位置保持',c1&&c2&&c1.chapter===c2.chapter&&c1.para===c2.para&&Math.abs(c1.offset-c2.offset)<=Math.max(30,c1.len*.1),{c1,c2});
 
   const short=await (await browser.newContext({viewport:{width:390,height:844}})).newPage();await short.goto(base);
   await upload(short,fixture('短章回归',80,1));await short.locator('.book-main').click();await short.waitForSelector('.paras p');await sleep(1000);

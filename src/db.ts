@@ -19,7 +19,20 @@ function openDB(): Promise<IDBDatabase> {
           store.createIndex('byBook', 'bookId', { unique: false });
         }
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const db = req.result;
+        // 其他标签页触发版本升级时主动断开，避免旧连接阻塞升级
+        db.onversionchange = () => {
+          db.close();
+          dbPromise = null;
+        };
+        resolve(db);
+      };
+      req.onblocked = () => {
+        // 有旧标签页占用连接；下次操作会重新尝试打开
+        dbPromise = null;
+        reject(new Error('本地数据库被其他标签页占用，请关闭后重试'));
+      };
       req.onerror = () => {
         dbPromise = null;
         reject(req.error);
@@ -91,7 +104,10 @@ export async function readSavedProgress(book: BookMeta): Promise<ReadingProgress
   const valid = (p: ReadingProgress | undefined): p is ReadingProgress => !!p &&
     Number.isInteger(p.chapterIndex) && p.chapterIndex >= 0 && p.chapterIndex < book.chapterCount &&
     Number.isInteger(p.paragraphIndex) && p.paragraphIndex >= 0 &&
-    Number.isFinite(p.paragraphProgress) && p.paragraphProgress >= 0 && p.paragraphProgress <= 1;
+    Number.isFinite(p.paragraphProgress) && p.paragraphProgress >= 0 && p.paragraphProgress <= 1 &&
+    // 旧版数据没有字符比例字段；存在时则必须合法
+    (p.paragraphCharProgress === undefined ||
+      (Number.isFinite(p.paragraphCharProgress) && p.paragraphCharProgress >= 0 && p.paragraphCharProgress <= 1));
   try {
     const raw = localStorage.getItem(`nr:prog:${book.id}`);
     if (raw) {
@@ -148,30 +164,10 @@ export async function replaceBook(
   } catch { /* 数据库已完整提交 */ }
 }
 
-/** 批量写入章节，每批一个事务 */
-export async function putChapterBatch(bookId: string, startIndex: number, items: { title: string; content: string }[]): Promise<void> {
-  const db = await openDB();
-  const tx = db.transaction('chapters', 'readwrite');
-  const store = tx.objectStore('chapters');
-  for (let i = 0; i < items.length; i++) {
-    store.put({ bookId, index: startIndex + i, title: items[i].title, content: items[i].content } satisfies ChapterRecord);
-  }
-  await txDone(tx);
-}
-
 export async function getChapter(bookId: string, index: number): Promise<ChapterRecord | undefined> {
   const db = await openDB();
   const tx = db.transaction('chapters', 'readonly');
   return reqToPromise(tx.objectStore('chapters').get([bookId, index]) as IDBRequest<ChapterRecord | undefined>);
-}
-
-export async function clearChapters(bookId: string): Promise<void> {
-  const db = await openDB();
-  const tx = db.transaction('chapters', 'readwrite');
-  const store = tx.objectStore('chapters');
-  const keys = await reqToPromise(store.index('byBook').getAllKeys(IDBKeyRange.only(bookId)));
-  for (const key of keys) store.delete(key);
-  await txDone(tx);
 }
 
 export async function countChapters(bookId: string): Promise<number> {
@@ -180,15 +176,45 @@ export async function countChapters(bookId: string): Promise<number> {
   return reqToPromise(tx.objectStore('chapters').index('byBook').count(IDBKeyRange.only(bookId)));
 }
 
+/** 原子删除：books 与 chapters 在同一事务中处理，任何一步失败全部回滚。 */
 export async function deleteBook(bookId: string): Promise<void> {
-  await clearChapters(bookId);
   const db = await openDB();
-  const tx = db.transaction('books', 'readwrite');
-  tx.objectStore('books').delete(bookId);
-  await txDone(tx);
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(['books', 'chapters'], 'readwrite');
+    const store = tx.objectStore('chapters');
+    let failure: unknown;
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => {
+      failure ??= tx.error;
+    };
+    tx.onabort = () => reject(failure ?? tx.error ?? new Error('删除失败，书籍已保留'));
+    const guard = (fn: () => void) => {
+      try {
+        fn();
+      } catch (e) {
+        failure = e;
+        try {
+          tx.abort();
+        } catch {
+          /* 事务可能已结束 */
+        }
+      }
+    };
+    const cursor = store.index('byBook').openCursor(IDBKeyRange.only(bookId));
+    cursor.onsuccess = () =>
+      guard(() => {
+        if (cursor.result) {
+          cursor.result.delete();
+          cursor.result.continue();
+        } else {
+          tx.objectStore('books').delete(bookId);
+        }
+      });
+  });
+  // 只有事务提交后才清理进度镜像
   try {
     localStorage.removeItem(`nr:prog:${bookId}`);
   } catch {
-    /* ignore */
+    /* 数据库已完整提交 */
   }
 }

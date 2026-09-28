@@ -5,6 +5,19 @@ export function getScrollTop(): number {
   return locked?.y ?? Math.max(0, window.scrollY);
 }
 
+/**
+ * 当前实际可见视口高度。
+ * Safari 地址栏展开/收起时 visualViewport.height 反映真实可见区域；
+ * 注意：高度变化只更新测量值，调用方才决定是否需要重新定位。
+ */
+export function getViewportHeight(): number {
+  return window.visualViewport?.height ?? window.innerHeight;
+}
+
+export function getViewportWidth(): number {
+  return window.visualViewport?.width ?? window.innerWidth;
+}
+
 export function scrollToY(y: number): void {
   const height = locked ? document.body.scrollHeight : document.documentElement.scrollHeight;
   const target = Math.max(0, Math.min(y, height - window.innerHeight));
