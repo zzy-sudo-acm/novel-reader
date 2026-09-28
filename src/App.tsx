@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import type { BookMeta } from './types';
 import { deleteBook, getAllBooks, readSavedProgress } from './db';
 import { importBookFile } from './importer';
@@ -26,9 +26,13 @@ export default function App() {
     void refresh().catch(() => setError('无法读取本地书架，请确认浏览器允许本地存储后刷新重试'));
   }, [refresh]);
 
-  // 主题挂到 <html>，使 body 背景覆盖 Safari 工具栏/橡皮筋/PWA 全屏区域
-  useEffect(() => {
-    document.documentElement.dataset.theme = openBookId ? settings.theme : 'white';
+  // 页面画布、新版 Safari 的边缘取色、旧版 Safari 的 theme-color 使用同一底色。
+  useLayoutEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = openBookId ? settings.theme : 'white';
+    root.dataset.surface = openBookId ? 'reader' : 'shelf';
+    const background = getComputedStyle(root).getPropertyValue('--bg').trim();
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', background);
   }, [openBookId, settings.theme]);
 
   const handleImport = useCallback(
@@ -64,6 +68,8 @@ export default function App() {
 
   return (
     <div className="app">
+      <div className="browser-edge browser-edge-top" aria-hidden="true" />
+      <div className="browser-edge browser-edge-bottom" aria-hidden="true" />
       {openBookId ? (
         <Reader
           key={openBookId}

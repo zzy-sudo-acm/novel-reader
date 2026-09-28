@@ -8,6 +8,8 @@
 html {
   /* 关闭浏览器自动滚动锚定：我们手动补偿，避免双重调整 */
   overflow-anchor: none;
+  background: var(--bg, #f7f7f8);
+  color-scheme: light;
 }
 
 body {
@@ -49,12 +51,44 @@ button {
   --accent: #8a6d2f;
 }
 [data-theme='dark'] {
+  color-scheme: dark;
   --bg: #111214;
   --fg: #c9c9ce;
   --fg-dim: #99999f;
   --bar-bg: rgba(17, 18, 20, 0.96);
   --bar-border: #2a2b2e;
   --accent: #d0a94e;
+}
+
+html[data-surface='shelf'] {
+  --bg: #f7f7f8;
+}
+
+/* Safari 26 会将贴近可视区边缘的固定实色背景延伸到浏览器工具栏区域。
+   菜单隐藏时也保留这个背景；不拦截触摸，不参与正文布局和滚动位置计算。
+   仅手机/平板浏览器使用，主屏幕版继续沿用现有的 safe-area 布局。
+   https://bugs.webkit.org/show_bug.cgi?id=301756#c2 */
+.browser-edge {
+  display: none;
+}
+@media (display-mode: browser) and (hover: none) and (pointer: coarse) {
+  .browser-edge {
+    display: block;
+    position: fixed;
+    left: 0;
+    right: 0;
+    background: var(--bg);
+    pointer-events: none;
+    z-index: 19;
+  }
+  .browser-edge-top {
+    top: 0;
+    height: max(12px, env(safe-area-inset-top, 0px));
+  }
+  .browser-edge-bottom {
+    bottom: 0;
+    height: max(12px, env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* ---------- 书架（原生文档滚动） ---------- */
@@ -209,7 +243,7 @@ button {
   max-width: 780px;
   margin-inline: auto;
   position: relative;
-  /* 顶部：仅避让状态栏/灵动岛（PWA 下 env 才有值），不额外留大空白 */
+  /* 顶部避让设备报告的状态栏/灵动岛安全区域。浏览器模式也可能有非零值。 */
   padding-top: calc(env(safe-area-inset-top) + 24px);
   /* 底部：保证最后一段能滚到 Home Indicator / Safari 地址栏上方 */
   padding-bottom: calc(env(safe-area-inset-bottom) + 48px);

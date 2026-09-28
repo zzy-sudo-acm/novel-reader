@@ -31,6 +31,20 @@ async function anchor(page) {
   });
 }
 const progress = page => page.evaluate(() => JSON.parse(localStorage.getItem(Object.keys(localStorage).find(k=>k.startsWith('nr:prog:')))));
+const browserColors = page => page.evaluate(() => ({
+  meta: document.querySelector('meta[name="theme-color"]').content,
+  canvas: getComputedStyle(document.documentElement).backgroundColor,
+  body: getComputedStyle(document.body).backgroundColor,
+  scheme: getComputedStyle(document.documentElement).colorScheme,
+  edges: [...document.querySelectorAll('.browser-edge')].map(el => ({
+    color: getComputedStyle(el).backgroundColor,
+    pointerEvents: getComputedStyle(el).pointerEvents,
+    display: getComputedStyle(el).display,
+    top: el.getBoundingClientRect().top,
+    bottom: el.getBoundingClientRect().bottom,
+  })),
+  height: innerHeight,
+}));
 const showBars = async page => { if (!await page.locator('.bottom-bar').isVisible()) await page.locator('.reader-menu-access').evaluate(el=>el.click()); };
 try {
   for(let i=0;i<60;i++){try{if((await fetch(base)).ok)break;}catch{} await sleep(200);}
@@ -39,10 +53,14 @@ try {
   const page = await ctx.newPage();
   const errors=[]; page.on('pageerror',e=>errors.push(String(e)));
   await page.goto(base);
+  const shelfColors=await browserColors(page);
+  check('书架画布与浏览器主题底色一致',shelfColors.meta==='#f7f7f8'&&shelfColors.canvas==='rgb(247, 247, 248)'&&shelfColors.body===shelfColors.canvas,shelfColors);
   await upload(page, fixture('滚动回归',30));
   await page.locator('.book-main').click();
   await page.waitForSelector('.paras p');
   await sleep(500);
+  const sepiaColors=await browserColors(page);
+  check('米黄主题同步浏览器主题色及上下背景',sepiaColors.meta==='#f5efe0'&&sepiaColors.canvas==='rgb(245, 239, 224)'&&sepiaColors.body===sepiaColors.canvas&&sepiaColors.edges.every(e=>e.color===sepiaColors.canvas&&e.pointerEvents==='none'&&e.display==='block'),sepiaColors);
   await page.evaluate(()=>{
     window.testScroll = window.scrollTo.bind(window);
     window.appScrollCalls=[];
@@ -72,6 +90,12 @@ try {
   await page.getByRole('button',{name:'深色',exact:true}).click(); await sleep(300);
   const afterTheme=await anchor(page);
   check('只改主题不改变正文位置',beforeTheme.chapter===afterTheme.chapter && beforeTheme.para===afterTheme.para && Math.abs(beforeTheme.top-afterTheme.top)<1,{beforeTheme,afterTheme});
+  const darkColors=await browserColors(page);
+  check('深色主题同步系统配色和边缘背景',darkColors.meta==='#111214'&&darkColors.canvas==='rgb(17, 18, 20)'&&darkColors.body===darkColors.canvas&&darkColors.scheme==='dark'&&darkColors.edges.every(e=>e.color===darkColors.canvas),darkColors);
+  await page.getByRole('button',{name:'白色',exact:true}).click();
+  const whiteColors=await browserColors(page);
+  check('切回白色同步浏览器外观',whiteColors.meta==='#ffffff'&&whiteColors.canvas==='rgb(255, 255, 255)'&&whiteColors.scheme==='light'&&whiteColors.edges.every(e=>e.color===whiteColors.canvas),whiteColors);
+  await page.getByRole('button',{name:'深色',exact:true}).click();
   const ranges=page.locator('.settings-sheet input[type=range]');
   for(const value of [20,24,16,18]) {
     await ranges.nth(0).evaluate((el,value)=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(el,String(value));el.dispatchEvent(new Event('input',{bubbles:true}));},value);
@@ -88,6 +112,11 @@ try {
   await page.keyboard.press('Escape'); await sleep(300);
   const afterClose=await anchor(page);
   check('关闭弹层保留正文位置',afterClose.para===beforeWheel.para && Math.abs(afterClose.top-beforeWheel.top)<1.5,{beforeWheel,afterClose});
+  const beforeBrowserResize=await page.evaluate(()=>scrollY);
+  await page.setViewportSize({width:390,height:700});await sleep(300);
+  const resizedColors=await browserColors(page);
+  check('浏览器栏展开后上下背景跟随视口且不滚动正文',resizedColors.edges[0].top===0&&resizedColors.edges[1].bottom===resizedColors.height&&await page.evaluate(()=>scrollY)===beforeBrowserResize,resizedColors);
+  await page.setViewportSize({width:390,height:844});await sleep(300);
   await page.setViewportSize({width:844,height:390}); await sleep(700);
   const landscape=await anchor(page);
   check('横屏保留段落和段内位置',landscape.chapter===afterClose.chapter&&landscape.para===afterClose.para&&Math.abs(landscape.ratio-afterClose.ratio)<.03,{afterClose,landscape});
@@ -156,6 +185,7 @@ try {
   check('短章节静止后不再反复增删',stable.changes===0&&stable.sections<80,stable);
   await short.setViewportSize({width:1440,height:900});await sleep(700);await short.screenshot({path:path.join(root,'e2e/results/fixed-desktop.png')});
   check('桌面正文宽度受限',await short.locator('.content').evaluate(el=>el.getBoundingClientRect().width)<=780);
+  check('桌面不叠加移动浏览器背景层',await short.locator('.browser-edge').first().evaluate(el=>getComputedStyle(el).display)==='none');
   console.log(`\n${checks} 项回归检查全部通过`);
 } finally {
   await browser?.close();
