@@ -57,8 +57,7 @@ async function readProg(page) {
 /** 当前参考线（视口 33%）处的段落定位 */
 async function paraAtRef(page) {
   return page.evaluate(() => {
-    const s = document.querySelector('.scroller');
-    const refY = s.scrollTop + s.clientHeight * 0.33;
+    const refY = window.scrollY + window.innerHeight * 0.33;
     const secs = [...document.querySelectorAll('section[data-idx]')];
     let cur = secs[0];
     for (const sec of secs) {
@@ -78,15 +77,16 @@ async function paraAtRef(page) {
 
 async function scrollTo(page, y) {
   await page.evaluate((v) => {
-    document.querySelector('.scroller').scrollTop = v;
+    window.scrollTo(0, v);
   }, y);
 }
 
 async function currentScroll(page) {
-  return page.evaluate(() => {
-    const s = document.querySelector('.scroller');
-    return { top: s.scrollTop, height: s.scrollHeight, view: s.clientHeight };
-  });
+  return page.evaluate(() => ({
+    top: window.scrollY,
+    height: document.documentElement.scrollHeight,
+    view: window.innerHeight,
+  }));
 }
 
 async function setRange(page, selector, index, value) {
@@ -150,7 +150,7 @@ try {
   // ---------- 4. 滚动到第 500 章中部 ----------
   await page.evaluate(() => {
     const sec = document.querySelector('section[data-idx="500"]');
-    document.querySelector('.scroller').scrollTop = sec.offsetTop + sec.offsetHeight / 2;
+    window.scrollTo(0, sec.offsetTop + sec.offsetHeight / 2);
   });
   await sleep(800);
   prog = await readProg(page);
@@ -177,7 +177,7 @@ try {
   const before = await currentScroll(page);
   await page.evaluate(() => {
     const sec = document.querySelector('section[data-idx="500"]');
-    document.querySelector('.scroller').scrollTop = sec.offsetTop + sec.offsetHeight + 300;
+    window.scrollTo(0, sec.offsetTop + sec.offsetHeight + 300);
   });
   await sleep(800);
   prog = await readProg(page);
@@ -187,7 +187,7 @@ try {
   // ---------- 7. 向上回到 500 章 ----------
   await page.evaluate(() => {
     const sec = document.querySelector('section[data-idx="500"]');
-    document.querySelector('.scroller').scrollTop = sec.offsetTop + 200;
+    window.scrollTo(0, sec.offsetTop + 200);
   });
   await sleep(800);
   prog = await readProg(page);
@@ -249,8 +249,7 @@ try {
   // ---------- 11. 连续快速滚动多个章节 ----------
   for (let i = 0; i < 60; i++) {
     await page.evaluate(() => {
-      const s = document.querySelector('.scroller');
-      s.scrollTop += 3000;
+      window.scrollBy(0, 3000);
     });
     await sleep(50);
   }
@@ -266,8 +265,7 @@ try {
   // ---------- 12. 快速上滚多个章节（prepend 不跳动） ----------
   for (let i = 0; i < 30; i++) {
     await page.evaluate(() => {
-      const s = document.querySelector('.scroller');
-      s.scrollTop -= 3000;
+      window.scrollBy(0, -3000);
     });
     await sleep(50);
   }
@@ -275,6 +273,50 @@ try {
   prog = await readProg(page);
   const win2 = await page.evaluate(() => document.querySelectorAll('section[data-idx]').length);
   check('快速上滚后章节回退且窗口受限', prog.chapterIndex < 1010 && win2 <= 9, `current=${prog.chapterIndex} sections=${win2}`);
+
+  // ---------- 12.5 视口高度变化（模拟 Safari 地址栏收起/展开）不扰乱阅读位置 ----------
+  const progBeforeResize = await readProg(page);
+  const scrollBefore = (await currentScroll(page)).top;
+  await page.setViewportSize({ width: 390, height: 700 });
+  await sleep(800);
+  const progAfterResize = await readProg(page);
+  const scrollAfter = (await currentScroll(page)).top;
+  check(
+    '视口高度变化后阅读位置不跳',
+    progAfterResize &&
+      progAfterResize.chapterIndex === progBeforeResize.chapterIndex &&
+      Math.abs(progAfterResize.paragraphIndex - progBeforeResize.paragraphIndex) <= 2 &&
+      Math.abs(scrollAfter - scrollBefore) < 2,
+    `scroll ${scrollBefore}→${scrollAfter} para ${progBeforeResize.paragraphIndex}→${progAfterResize?.paragraphIndex}`,
+  );
+  await page.setViewportSize({ width: 390, height: 844 });
+  await sleep(500);
+
+  // ---------- 12.6 全书最后一章的最后一段可以完整滚入视口 ----------
+  await toggleBars(page);
+  await page.locator('.bottom-bar .bar-btn', { hasText: '目录' }).click();
+  await page.waitForSelector('.toc-search');
+  await page.fill('.toc-search', TITLES[TITLES.length - 1]);
+  await page.locator('.toc-row').first().click();
+  await page.waitForSelector(`section[data-idx="${TITLES.length - 1}"]`, { timeout: 10000 });
+  await sleep(600);
+  await page.evaluate(() => {
+    window.scrollTo(0, document.documentElement.scrollHeight);
+  });
+  await sleep(1000);
+  const bottomCheck = await page.evaluate(() => {
+    const paras = document.querySelectorAll('.paras p');
+    const last = paras[paras.length - 1];
+    if (!last) return { ok: false, reason: 'no paras' };
+    const r = last.getBoundingClientRect();
+    const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+    return { ok: r.bottom <= window.innerHeight + 1, bottom: r.bottom, view: window.innerHeight, maxScroll, scrollY: window.scrollY, end: !!document.querySelector('.book-end') };
+  });
+  check(
+    '全书最后一段正文可完整滚入视口（不被底部遮挡）',
+    bottomCheck.ok && bottomCheck.end,
+    `bottom=${bottomCheck.bottom?.toFixed(0)} view=${bottomCheck.view} scroll=${bottomCheck.scrollY?.toFixed(0)}/${bottomCheck.maxScroll?.toFixed(0)} end=${bottomCheck.end}`,
+  );
 
   // ---------- 13. 模拟切后台 / pagehide 后进度不丢 ----------
   await page.evaluate(() => {

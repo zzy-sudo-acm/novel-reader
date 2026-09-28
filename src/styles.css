@@ -5,16 +5,17 @@
   padding: 0;
 }
 
-html,
-body,
-#root {
-  height: 100%;
+html {
+  /* 关闭浏览器自动滚动锚定：我们手动补偿，避免双重调整 */
+  overflow-anchor: none;
 }
 
 body {
   -webkit-font-smoothing: antialiased;
   font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   overscroll-behavior: none;
+  background: var(--bg, #fff);
+  color: var(--fg, #1a1a1a);
 }
 
 button {
@@ -26,14 +27,11 @@ button {
 }
 
 .app {
-  height: 100vh;
-  height: 100dvh;
-  overflow: hidden;
-  background: #fff;
-  color: #1a1a1a;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
-/* ---------- 主题 ---------- */
+/* ---------- 主题（挂在 <html data-theme> 上，body 背景全覆盖） ---------- */
 [data-theme='white'] {
   --bg: #ffffff;
   --fg: #1a1a1a;
@@ -59,11 +57,10 @@ button {
   --accent: #d0a94e;
 }
 
-/* ---------- 书架 ---------- */
+/* ---------- 书架（原生文档滚动） ---------- */
 .shelf {
-  height: 100%;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
+  min-height: 100vh;
+  min-height: 100dvh;
   padding: calc(env(safe-area-inset-top) + 16px) 16px calc(env(safe-area-inset-bottom) + 24px);
   background: #f7f7f8;
 }
@@ -200,29 +197,25 @@ button {
   z-index: 60;
 }
 
-/* ---------- 阅读器 ---------- */
+/* ---------- 阅读器（原生文档滚动，无内部滚动容器） ---------- */
 .reader {
-  position: relative;
-  height: 100%;
   background: var(--bg);
   color: var(--fg);
 }
 
-.scroller {
-  position: absolute;
-  inset: 0;
-  overflow-y: auto;
-  -webkit-overflow-scrolling: touch;
-  overflow-anchor: none;
-  overscroll-behavior: none;
-}
-
 .content {
   position: relative;
-  padding: calc(env(safe-area-inset-top) + 24px) var(--mg) calc(env(safe-area-inset-bottom) + 40px);
+  /* 顶部：仅避让状态栏/灵动岛（PWA 下 env 才有值），不额外留大空白 */
+  padding-top: calc(env(safe-area-inset-top) + 24px);
+  /* 底部：保证最后一段能滚到 Home Indicator / Safari 地址栏上方 */
+  padding-bottom: calc(env(safe-area-inset-bottom) + 48px);
+  padding-left: var(--mg);
+  padding-right: var(--mg);
   font-size: var(--fs);
   line-height: var(--lh);
   overflow-wrap: break-word;
+  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .ch-title {
@@ -248,8 +241,19 @@ section:first-child .ch-title {
   font-size: 0.85em;
 }
 
+.loading {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-dim);
+  background: var(--bg);
+  z-index: 40;
+}
+
 .tap-hint {
-  position: absolute;
+  position: fixed;
   left: 50%;
   top: 55%;
   transform: translateX(-50%);
@@ -263,19 +267,9 @@ section:first-child .ch-title {
   white-space: nowrap;
 }
 
-.loading {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-dim);
-  background: var(--bg);
-}
-
-/* ---------- 控制栏 ---------- */
+/* ---------- 控制栏（fixed + safe-area） ---------- */
 .bar {
-  position: absolute;
+  position: fixed;
   left: 0;
   right: 0;
   display: flex;
@@ -332,9 +326,9 @@ section:first-child .ch-title {
   color: var(--fg-dim);
 }
 
-/* ---------- 浮层（目录 / 设置） ---------- */
+/* ---------- 浮层（目录 / 设置，fixed 全屏） ---------- */
 .overlay {
-  position: absolute;
+  position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.35);
   z-index: 30;
@@ -352,6 +346,7 @@ section:first-child .ch-title {
   width: 100%;
   height: 100%;
   padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .sheet-head {
@@ -451,4 +446,12 @@ section:first-child .ch-title {
 .seg button.seg-on {
   color: var(--accent);
   border-color: var(--accent);
+}
+
+/* ---------- PWA standalone 微调 ---------- */
+@media (display-mode: standalone) {
+  /* 独立 App 模式下没有浏览器地址栏，正文顶部留少一点空隙 */
+  .content {
+    padding-top: calc(env(safe-area-inset-top) + 12px);
+  }
 }

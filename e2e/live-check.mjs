@@ -36,7 +36,7 @@ const text = await page.locator('.reader section .paras p').first().innerText();
 console.log('阅读页正文开头:', text.slice(0, 30));
 
 await page.evaluate(() => {
-  document.querySelector('.scroller').scrollTop += 5000;
+  window.scrollBy(0, 5000);
 });
 await new Promise((r) => setTimeout(r, 800));
 const sections = await page.evaluate(() => document.querySelectorAll('section[data-idx]').length);

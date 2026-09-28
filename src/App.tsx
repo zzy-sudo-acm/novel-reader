@@ -21,6 +21,11 @@ export default function App() {
     void refresh();
   }, [refresh]);
 
+  // 主题挂到 <html>，使 body 背景覆盖 Safari 工具栏/橡皮筋/PWA 全屏区域
+  useEffect(() => {
+    document.documentElement.dataset.theme = openBookId ? settings.theme : 'white';
+  }, [openBookId, settings.theme]);
+
   const handleImport = useCallback(
     async (file: File) => {
       setError(null);
@@ -53,7 +58,7 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app" data-theme={openBookId ? settings.theme : 'white'}>
+    <div className="app">
       {openBookId ? (
         <Reader
           bookId={openBookId}
