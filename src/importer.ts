@@ -142,6 +142,8 @@ export async function importBookFile(
     toc,
     totalChars,
     addedAt: Date.now(),
+    lastReadAt: existing?.lastReadAt,
+    readingStatus: existing?.readingStatus ?? (existing?.progress ? 'reading' : 'unread'),
     progress,
     progressUpdatedAt: Date.now(),
   };

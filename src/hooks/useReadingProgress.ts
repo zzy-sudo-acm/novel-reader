@@ -26,13 +26,14 @@ interface Options {
   bookId: string;
   bookRef: { current: BookMeta | null };
   cw: ChapterWindow;
+  isMeasurementBlocked: () => boolean;
 }
 
 /**
  * 阅读进度：当前章节/段落判断、进度保存与恢复、改字号后的重新定位。
  * 进度同时记录高度比例（兼容旧数据）和字符比例（跨布局更稳定）。
  */
-export function useReadingProgress({ bookId, bookRef, cw }: Options) {
+export function useReadingProgress({ bookId, bookRef, cw, isMeasurementBlocked }: Options) {
   const [current, setCurrent] = useState(0);
   const currentRef = useRef(0);
   const [percent, setPercent] = useState(0);
@@ -45,7 +46,7 @@ export function useReadingProgress({ bookId, bookRef, cw }: Options) {
   // ---------- 当前章节与进度 ----------
 
   function updateCurrent() {
-    if (!initializedRef.current || pendingScrollRef.current) return;
+    if (!initializedRef.current || pendingScrollRef.current || isMeasurementBlocked()) return;
     const refY = getScrollTop() + getViewportHeight() * READING_LINE;
     const idxs = cw.indicesRef.current;
     if (idxs.length === 0) return;
@@ -197,12 +198,22 @@ export function useReadingProgress({ bookId, bookRef, cw }: Options) {
     return start;
   }
 
-  /** 目录跳转后重置进度到目标章节开头 */
-  function jumpSet(target: number) {
-    pendingScrollRef.current = { chapter: target, para: 0, ratio: 0 };
-    progressRef.current = { chapter: target, para: 0, ratio: 0, charRatio: undefined };
-    currentRef.current = target;
-    setCurrent(target);
+  /** 目录、书签及搜索共用同一套段落定位，避免绕过进度恢复逻辑。 */
+  function jumpSet(target: ReadingProgress) {
+    pendingScrollRef.current = {
+      chapter: target.chapterIndex,
+      para: target.paragraphIndex,
+      ratio: target.paragraphProgress,
+      charProgress: target.paragraphCharProgress,
+    };
+    progressRef.current = {
+      chapter: target.chapterIndex,
+      para: target.paragraphIndex,
+      ratio: target.paragraphProgress,
+      charRatio: target.paragraphCharProgress,
+    };
+    currentRef.current = target.chapterIndex;
+    setCurrent(target.chapterIndex);
     scheduleSave();
   }
 

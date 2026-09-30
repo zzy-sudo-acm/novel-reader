@@ -334,6 +334,38 @@ html[data-surface='shelf'] {
   justify-content: space-between;
 }
 
+.bottom-bar > .bar-btn {
+  flex: 1;
+  min-width: 44px;
+  min-height: 48px;
+  text-align: center;
+}
+
+.return-position {
+  position: fixed;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom) + 60px);
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--bar-border);
+  border-radius: 12px;
+  background: var(--bg);
+  color: var(--accent);
+  font-size: 14px;
+  z-index: 20;
+}
+
+.paras mark {
+  background: #f1d78c;
+  color: #3d3225;
+  border-radius: 2px;
+}
+
+[data-theme='dark'] .paras mark {
+  background: #6a5426;
+  color: #fff2cf;
+}
+
 .bar-btn {
   padding: 12px 16px;
   font-size: 15px;
@@ -350,6 +382,19 @@ html[data-surface='shelf'] {
   overflow: hidden;
   text-overflow: ellipsis;
   padding: 0 4px;
+}
+
+.bar-title > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.bar-chapter-number {
+  display: block;
+  font-size: 11px;
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
 }
 
 .bar-pct {

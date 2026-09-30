@@ -1,9 +1,12 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { BookMeta } from '../types';
-import { getBook, readSavedProgress } from '../db';
+import type { BookMeta, ReadingProgress } from '../types';
+import { getBook, markBookOpened, readSavedProgress } from '../db';
+import { findLiteralMatch, type SearchMatch } from '../search';
 import type { ReaderSettings } from '../settings';
 import Toc from './Toc';
 import SettingsSheet from './SettingsSheet';
+import BookmarksSheet from './BookmarksSheet';
+import SearchSheet from './SearchSheet';
 import { useChapterWindow } from '../hooks/useChapterWindow';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { useReaderGestures } from '../hooks/useReaderGestures';
@@ -14,6 +17,16 @@ interface Props {
   settings: ReaderSettings;
   onSettingsChange: (s: ReaderSettings) => void;
   onExit: () => void;
+}
+
+type Overlay = 'none' | 'toc' | 'settings' | 'bookmarks' | 'search';
+interface SearchHighlight { chapter: number; paragraph: number; query: string }
+
+// 只生成文本节点和 mark，不把小说内容当作 HTML 执行。
+function highlightText(text: string, query: string): React.ReactNode {
+  const match = findLiteralMatch(text, query);
+  if (!match) return text;
+  return <>{text.slice(0, match.offset)}<mark>{text.slice(match.offset, match.offset + match.length)}</mark>{text.slice(match.offset + match.length)}</>;
 }
 
 /**
@@ -27,8 +40,14 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   const [error, setError] = useState<string | null>(null);
   const [barsVisible, setBarsVisible] = useState(true);
   const [showHint, setShowHint] = useState(false);
-  const [overlay, setOverlay] = useState<'none' | 'toc' | 'settings'>('none');
-  const overlayRef = useRef<'none' | 'toc' | 'settings'>('none');
+  const [overlay, setOverlay] = useState<Overlay>('none');
+  const overlayRef = useRef<Overlay>('none');
+  const [bookmarkPosition, setBookmarkPosition] = useState<ReadingProgress | null>(null);
+  const panelOriginRef = useRef<ReadingProgress | null>(null);
+  const [returnLocations, setReturnLocations] = useState<ReadingProgress[]>([]);
+  const [highlight, setHighlight] = useState<SearchHighlight | null>(null);
+  const [jumping, setJumping] = useState(false);
+  const jumpingRef = useRef(false);
   const errorRef = useRef(false);
   const activeRef = useRef(false);
   const hintTimerRef = useRef(0);
@@ -49,12 +68,13 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
     canSync: () =>
       prog.initializedRef.current &&
       !errorRef.current &&
+      !jumpingRef.current &&
       overlayRef.current === 'none' &&
       !prog.pendingScrollRef.current,
     onError: fail,
   });
 
-  const prog = useReadingProgress({ bookId, bookRef, cw });
+  const prog = useReadingProgress({ bookId, bookRef, cw, isMeasurementBlocked: () => overlayRef.current !== 'none' });
 
   // ---------- 渲染后：应用待处理的定位 / 滚动补偿，然后继续窗口同步 ----------
 
@@ -99,6 +119,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
       if (cancelled || generation !== cw.generationRef.current) return;
       cw.setWindow(arr);
       setReady(true);
+      void markBookOpened(bookId).catch(() => {
+        // 最近阅读记录失败不阻断已加载的正文。
+      });
       // 首次进入时控制栏默认可见，并短暂提示操作方式
       setBarsVisible(true);
       setShowHint(true);
@@ -162,26 +185,77 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
   // ---------- 跳转 ----------
 
-  async function jumpTo(i: number) {
+  function snapshotPosition(): ReadingProgress {
+    prog.updateCurrent();
+    const p = prog.progressRef.current;
+    return {
+      chapterIndex: p.chapter,
+      paragraphIndex: p.para,
+      paragraphProgress: p.ratio,
+      paragraphCharProgress: p.charRatio,
+    };
+  }
+
+  function openPanel(panel: Exclude<Overlay, 'none'>) {
+    window.clearTimeout(hintTimerRef.current);
+    setShowHint(false);
+    const position = snapshotPosition();
+    panelOriginRef.current = position;
+    if (panel === 'bookmarks') setBookmarkPosition(position);
+    setOverlay(panel);
+  }
+
+  async function jumpTo(
+    position: ReadingProgress,
+    searchHighlight: SearchHighlight | null = null,
+    returning = false,
+  ) {
     const b = bookRef.current;
     if (!b) return;
-    setOverlay('none');
+    // 手机搜索键盘改变可见高度；返回位置始终取打开面板之前的正文锚点。
+    const origin = overlayRef.current !== 'none' && panelOriginRef.current ? { ...panelOriginRef.current } : snapshotPosition();
     const generation = ++cw.generationRef.current;
+    jumpingRef.current = true;
+    setJumping(true);
     errorRef.current = false;
     setError(null);
-    const target = Math.max(0, Math.min(i, b.chapterCount - 1));
+    const target = Math.max(0, Math.min(position.chapterIndex, b.chapterCount - 1));
     const lo = Math.max(0, target - 1);
     const hi = Math.min(b.chapterCount - 1, target + 2);
     const arr = Array.from({ length: hi - lo + 1 }, (_, k) => lo + k);
     try {
       await Promise.all(arr.map(cw.loadChapter));
     } catch (e) {
-      fail(e);
+      if (generation === cw.generationRef.current) {
+        jumpingRef.current = false;
+        setJumping(false);
+        setOverlay('none');
+        fail(e);
+      }
       return;
     }
     if (!activeRef.current || generation !== cw.generationRef.current) return;
+    const paragraphs = cw.cacheRef.current.get(target)?.paragraphs.length ?? 1;
+    const destination = { ...position, chapterIndex: target, paragraphIndex: Math.max(0, Math.min(position.paragraphIndex, paragraphs - 1)) };
+    // 弹层关闭、窗口替换和段落定位在同一轮渲染完成，保持原生滚动锚点。
+    setOverlay('none');
     cw.resetWindow(arr);
-    prog.jumpSet(target);
+    prog.jumpSet(destination);
+    setHighlight(searchHighlight);
+    setReturnLocations((locations) => returning ? locations.slice(0, -1) : [...locations.slice(-9), origin]);
+    jumpingRef.current = false;
+    setJumping(false);
+    setBarsVisible(true);
+  }
+
+  function jumpToSearch(match: SearchMatch, query: string) {
+    const fraction = match.matchOffset / Math.max(1, match.paragraphLength);
+    void jumpTo({
+      chapterIndex: match.chapterIndex,
+      paragraphIndex: match.paragraphIndex,
+      paragraphProgress: fraction,
+      paragraphCharProgress: fraction,
+    }, { chapter: match.chapterIndex, paragraph: match.paragraphIndex, query });
   }
 
   function handleBack() {
@@ -231,7 +305,9 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
                 <h2 className="ch-title">{ch.title}</h2>
                 <div className="paras">
                   {ch.paragraphs.map((t, k) => (
-                    <p key={k}>{t}</p>
+                    <p key={k} data-paragraph={k}>
+                      {highlight?.chapter === i && highlight.paragraph === k ? highlightText(t, highlight.query) : t}
+                    </p>
                   ))}
                 </div>
               </section>
@@ -249,28 +325,51 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
             <button className="bar-btn" onClick={handleBack}>
               ‹ 书架
             </button>
-            <div className="bar-title">{b?.toc[prog.current]?.t ?? b?.title ?? ''}</div>
+            <div className="bar-title">
+              <span>{b?.toc[prog.current]?.t ?? b?.title ?? ''}</span>
+              {b && <small className="bar-chapter-number">{prog.current + 1}/{b.chapterCount} 章</small>}
+            </div>
             <div className="bar-pct">{prog.percent.toFixed(1)}%</div>
           </div>
           <div className="bar bottom-bar">
-            <button className="bar-btn" onClick={() => setOverlay('toc')}>
+            <button className="bar-btn" disabled={!ready || jumping} onClick={() => openPanel('toc')}>
               目录
             </button>
-            <div className="bar-sub">
-              {prog.current + 1}/{b?.chapterCount ?? 0}
-            </div>
-            <button className="bar-btn" onClick={() => setOverlay('settings')}>
+            <button className="bar-btn" disabled={!ready || jumping} onClick={() => openPanel('bookmarks')}>
+              书签
+            </button>
+            <button className="bar-btn" disabled={!ready || jumping} onClick={() => openPanel('search')}>
+              搜索
+            </button>
+            <button className="bar-btn" disabled={!ready || jumping} onClick={() => openPanel('settings')}>
               设置
             </button>
           </div>
+          {returnLocations.length > 0 && (
+            <button className="return-position" disabled={jumping} onClick={() => void jumpTo(returnLocations[returnLocations.length - 1], null, true)}>
+              返回原阅读位置
+            </button>
+          )}
         </>
       )}
 
       {overlay === 'toc' && b && (
-        <Toc toc={b.toc} current={prog.current} onClose={() => setOverlay('none')} onSelect={jumpTo} />
+        <Toc toc={b.toc} current={prog.current} onClose={() => setOverlay('none')} onSelect={(chapterIndex) => void jumpTo({ chapterIndex, paragraphIndex: 0, paragraphProgress: 0 })} />
       )}
       {overlay === 'settings' && (
         <SettingsSheet settings={settings} onChange={onSettingsChange} onClose={() => setOverlay('none')} />
+      )}
+      {overlay === 'bookmarks' && bookmarkPosition && (
+        <BookmarksSheet
+          bookId={bookId}
+          current={bookmarkPosition}
+          currentExcerpt={cw.cacheRef.current.get(bookmarkPosition.chapterIndex)?.paragraphs[bookmarkPosition.paragraphIndex] ?? ''}
+          onClose={() => setOverlay('none')}
+          onSelect={(position) => void jumpTo(position)}
+        />
+      )}
+      {overlay === 'search' && b && (
+        <SearchSheet bookId={bookId} chapterCount={b.chapterCount} onClose={() => setOverlay('none')} onSelect={jumpToSearch} />
       )}
 
       {error && (
@@ -284,7 +383,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
       {!ready && !error && <div className="loading">加载中…</div>}
 
       {ready && showHint && overlay === 'none' && (
-        <div className="tap-hint">轻点屏幕中央可显示 / 隐藏菜单（目录、设置）</div>
+        <div className="tap-hint">轻点屏幕中央可显示 / 隐藏阅读菜单</div>
       )}
     </div>
   );

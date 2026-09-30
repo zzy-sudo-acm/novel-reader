@@ -27,6 +27,9 @@ export interface BookMeta {
   toc: TocEntry[];
   totalChars: number;
   addedAt: number;
+  /** 实际打开或保存阅读进度的时间；导入不会更新。 */
+  lastReadAt?: number;
+  readingStatus?: 'unread' | 'reading' | 'finished';
   progress?: ReadingProgress;
   /** 与同步进度镜像比较新旧；无进度时也记录重置时间。 */
   progressUpdatedAt?: number;
@@ -37,4 +40,15 @@ export interface ChapterRecord {
   index: number;
   title: string;
   content: string;
+}
+
+export interface Bookmark {
+  id: string;
+  bookId: string;
+  chapterTitle: string;
+  excerpt: string;
+  createdAt: number;
+  progress: ReadingProgress;
+  /** 重导入后无法确认原章节时保留书签，但禁止跳转。 */
+  unavailable?: boolean;
 }

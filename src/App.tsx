@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useState } from 'react';
 import type { BookMeta } from './types';
-import { deleteBook, getAllBooks, readSavedProgress } from './db';
+import { deleteBook, getAllBooks, readSavedProgress, setBookReadingStatus } from './db';
 import { importBookFile } from './importer';
 import { loadSettings, saveSettings, type ReaderSettings } from './settings';
 import Bookshelf from './components/Bookshelf';
@@ -17,7 +17,7 @@ export default function App() {
     const items = await getAllBooks();
     setBooks(await Promise.all(items.map(async (book) => {
       const progress = await readSavedProgress(book);
-      const started = book.progress || progress.chapterIndex || progress.paragraphIndex || progress.paragraphProgress;
+      const started = book.progress || book.lastReadAt || progress.chapterIndex || progress.paragraphIndex || progress.paragraphProgress;
       return { ...book, progress: started ? progress : undefined };
     })));
   }, []);
@@ -66,6 +66,15 @@ export default function App() {
     saveSettings(s);
   }, []);
 
+  const handleStatusChange = useCallback(async (id: string, status: 'reading' | 'finished') => {
+    try {
+      await setBookReadingStatus(id, status);
+      await refresh();
+    } catch {
+      setError('阅读状态保存失败，请稍后重试');
+    }
+  }, [refresh]);
+
   return (
     <div className="app">
       <div className="browser-edge browser-edge-top" aria-hidden="true" />
@@ -89,6 +98,7 @@ export default function App() {
             onImport={handleImport}
             onOpen={setOpenBookId}
             onDelete={handleDelete}
+            onStatusChange={handleStatusChange}
           />
           {error && (
             <div className="error-toast" role="alert" onClick={() => setError(null)}>
