@@ -11,6 +11,7 @@ import { useChapterWindow } from '../hooks/useChapterWindow';
 import { useReadingProgress } from '../hooks/useReadingProgress';
 import { useReaderGestures } from '../hooks/useReaderGestures';
 import { useReaderViewport } from '../hooks/useReaderViewport';
+import { useScrollTopRecovery } from '../hooks/useScrollTopRecovery';
 
 interface Props {
   bookId: string;
@@ -75,6 +76,19 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   });
 
   const prog = useReadingProgress({ bookId, bookRef, cw, isMeasurementBlocked: () => overlayRef.current !== 'none' });
+  const recovery = useScrollTopRecovery({
+    getPosition: () => {
+      const p = prog.progressRef.current;
+      return { chapterIndex: p.chapter, paragraphIndex: p.para, paragraphProgress: p.ratio, paragraphCharProgress: p.charRatio };
+    },
+    isBlocked: () => !prog.initializedRef.current || jumpingRef.current || errorRef.current || overlayRef.current !== 'none' || !!prog.pendingScrollRef.current,
+    onRecoverable: (position) => {
+      setReturnLocations((locations) => [...locations.slice(-9), position]);
+      window.clearTimeout(hintTimerRef.current);
+      setShowHint(false);
+      setBarsVisible(true);
+    },
+  });
 
   // ---------- 渲染后：应用待处理的定位 / 滚动补偿，然后继续窗口同步 ----------
 
@@ -95,6 +109,7 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
 
     if (!prog.applyPendingScroll()) cw.applyAnchor();
     if (prog.initializedRef.current) prog.updateCurrent();
+    recovery.syncPosition();
     cw.scheduleSync();
   });
 
@@ -152,11 +167,13 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
   }, []);
 
   function onScroll() {
+    recovery.onScroll();
     cw.notifyScroll();
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = 0;
       prog.updateCurrent();
+      recovery.syncPosition();
       cw.scheduleSync();
       prog.scheduleSave();
     });

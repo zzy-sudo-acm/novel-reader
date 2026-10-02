@@ -1,5 +1,11 @@
 // 弹层打开时 iOS 需要固定 body；阅读器继续使用同一套逻辑文档坐标。
 let locked: { y: number; restore: () => void } | null = null;
+let scrollRevision = 0;
+
+/** 区分应用主动定位与浏览器/用户滚动，避免把目录跳转等识别为意外回顶。 */
+export function getScrollRevision(): number {
+  return scrollRevision;
+}
 
 export function getScrollTop(): number {
   return locked?.y ?? Math.max(0, window.scrollY);
@@ -19,6 +25,7 @@ export function getViewportWidth(): number {
 }
 
 export function scrollToY(y: number): void {
+  scrollRevision++;
   const height = locked ? document.body.scrollHeight : document.documentElement.scrollHeight;
   const target = Math.max(0, Math.min(y, height - window.innerHeight));
   if (locked) {

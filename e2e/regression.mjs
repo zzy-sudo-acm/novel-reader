@@ -267,6 +267,38 @@ try {
   await upload(short,fixture('短章回归',80,1));await short.locator('.book-main').click();await short.waitForSelector('.paras p');await sleep(1000);
   const stable=await short.evaluate(async()=>{let changes=0;const mo=new MutationObserver(()=>changes++);mo.observe(document.querySelector('.content'),{childList:true});await new Promise(r=>setTimeout(r,800));mo.disconnect();return {changes,sections:document.querySelectorAll('section[data-idx]').length};});
   check('短章节静止后不再反复增删',stable.changes===0&&stable.sections<80,stable);
+
+  // 浏览器/系统回顶只提供 scroll 事件，不经过应用的 scrollToY。
+  // 从保存的进度开始，验证动画全过程保留起点，而不是最后一帧的位置。
+  const recoveryPage=await (await browser.newContext({viewport:{width:390,height:844},isMobile:true,hasTouch:true})).newPage();
+  await recoveryPage.goto(base);
+  await upload(recoveryPage,fixture('回顶恢复',20,20));
+  await recoveryPage.evaluate(async()=>{
+    const db=await import('/novel-reader/src/db.ts');
+    const [book]=await db.getAllBooks();
+    await db.saveBookProgress(book.id,{chapterIndex:12,paragraphIndex:15,paragraphProgress:.4});
+  });
+  await recoveryPage.locator('.book-main').click();
+  await recoveryPage.waitForSelector('.paras p'); await sleep(700);
+  check('恢复进度不会误报回顶',await recoveryPage.locator('.return-position').count()===0);
+  const initialY=await recoveryPage.evaluate(()=>scrollY);
+  for(const y of [130,230,350]) { await recoveryPage.touchscreen.tap(195,y); await sleep(300); }
+  check('上半屏连续轻点不移动正文',Math.abs(await recoveryPage.evaluate(()=>scrollY)-initialY)<2);
+  await recoveryPage.evaluate(()=>window.scrollBy(0,-150)); await sleep(500);
+  check('普通向上短滑不显示返回入口',await recoveryPage.locator('.return-position').count()===0);
+  for(const behavior of ['smooth','instant']) {
+    const origin=await anchor(recoveryPage);
+    if(await recoveryPage.locator('.bottom-bar').isVisible()) await recoveryPage.touchscreen.tap(195,350);
+    await recoveryPage.evaluate(behavior=>window.scrollTo({top:0,behavior}),behavior);
+    await recoveryPage.waitForFunction(()=>scrollY<=2);
+    await recoveryPage.getByRole('button',{name:'返回原阅读位置',exact:true}).waitFor({state:'visible'});
+    check(`${behavior} 大幅回顶后自动显示恢复入口`,await recoveryPage.locator('.bottom-bar').isVisible());
+    await recoveryPage.getByRole('button',{name:'返回原阅读位置',exact:true}).click(); await sleep(700);
+    const returned=await anchor(recoveryPage);
+    check(`${behavior} 回顶后恢复误触前的段落和位置`,origin.chapter===returned.chapter&&origin.para===returned.para&&Math.abs(origin.top-returned.top)<2,{origin,returned});
+    check(`${behavior} 返回后不会循环生成恢复入口`,await recoveryPage.locator('.return-position').count()===0);
+  }
+
   await short.setViewportSize({width:1440,height:900});await sleep(700);await short.screenshot({path:path.join(root,'e2e/results/fixed-desktop.png')});
   check('桌面正文宽度受限',await short.locator('.content').evaluate(el=>el.getBoundingClientRect().width)<=780);
   check('桌面不叠加移动浏览器背景层',await short.locator('.browser-edge').first().evaluate(el=>getComputedStyle(el).display)==='none');
