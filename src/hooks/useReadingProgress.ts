@@ -142,7 +142,7 @@ export function useReadingProgress({ bookId, bookRef, cw, isMeasurementBlocked }
     let yInPara = yRatio;
     const el = cw.paraElement(t.chapter, p);
     const text = cw.cacheRef.current.get(t.chapter)?.paragraphs[p] ?? '';
-    if (el && text && t.charProgress != null) {
+    if (el && text && t.charProgress != null && !el.querySelector('.book-illustration')) {
       // 字符级近似定位：总行数取实际渲染值，每行字符数由段落长度均摊，
       // 对字号/行距变化比高度比例更稳；布局未变时与高度比例一致（偏差小于一行），
       // 此时仍用精确的高度比例，保证刷新恢复像素级不变。

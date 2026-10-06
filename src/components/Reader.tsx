@@ -324,6 +324,14 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
                   {ch.paragraphs.map((t, k) => (
                     <p key={k} data-paragraph={k}>
                       {highlight?.chapter === i && highlight.paragraph === k ? highlightText(t, highlight.query) : t}
+                      {ch.images?.filter(image => image.afterParagraph === k).map((image, n) => (
+                        <span className="book-illustration" key={n} style={{ display: 'block', textIndent: 0, margin: '1em 0' }}>
+                          <img src={image.dataUrl} alt={image.alt} width={image.width} height={image.height}
+                            loading="lazy" decoding="async"
+                            style={{ display: 'block', width: '100%', height: 'auto', aspectRatio: `${image.width} / ${image.height}`, objectFit: 'contain' }} />
+                          {image.alt && <span style={{ display: 'block', fontSize: '0.8em', opacity: 0.7, textAlign: 'center' }}>{image.alt}</span>}
+                        </span>
+                      ))}
                     </p>
                   ))}
                 </div>

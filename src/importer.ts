@@ -1,4 +1,5 @@
-import type { BookMeta, ReadingProgress, TocEntry } from './types';
+import type { BookMeta, ReadingProgress, TocEntry, ChapterIllustration } from './types';
+import { parseIllustrations } from './illustrations';
 import { getAllBooks, readSavedProgress, replaceBook } from './db';
 
 interface RawBook {
@@ -98,11 +99,12 @@ export async function importBookFile(
   const title = raw.title.trim();
   if (!title) throw new Error('文件格式不正确：书名不能为空');
   const source = typeof raw.source === 'string' && raw.source.trim() ? raw.source.trim() : undefined;
-  const chapters: { title: string; content: string }[] = [];
+  const chapters: { title: string; content: string; images?: ChapterIllustration[] }[] = [];
   for (const c of raw.chapters) {
-    const ch = c as { title?: unknown; content?: unknown };
+    const ch = c as { title?: unknown; content?: unknown; images?: unknown };
     if (typeof ch?.title === 'string' && typeof ch?.content === 'string') {
-      chapters.push({ title: ch.title, content: ch.content });
+      const images = await parseIllustrations(ch.images, splitParagraphs(ch.content).length);
+      chapters.push({ title: ch.title, content: ch.content, ...(images?.length ? { images } : {}) });
     } else throw new Error('文件中有格式错误的章节，未导入，请检查 title 和 content');
   }
   if (chapters.length === 0) throw new Error('文件格式不正确：没有有效章节');

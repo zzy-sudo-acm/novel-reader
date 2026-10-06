@@ -1,11 +1,13 @@
 import { useEffect, useReducer, useRef } from 'react';
 import { getChapter } from '../db';
+import type { ChapterIllustration } from '../types';
 import { getScrollTop, getViewportHeight, scrollToY } from '../scroll';
 
 export interface ChapterData {
   index: number;
   title: string;
   paragraphs: string[];
+  images?: ChapterIllustration[];
 }
 
 /** 至少保留的章节数；短章节还必须满足像素缓冲区，不能强行裁到六章。 */
@@ -106,7 +108,7 @@ export function useChapterWindow({ bookId, activeRef, getChapterCount, canSync, 
     if (cached) return cached;
     const rec = await getChapter(bookId, i);
     if (!rec) throw new Error(`第 ${i + 1} 章正文缺失，请重新导入完整书籍`);
-    const data: ChapterData = { index: i, title: rec.title, paragraphs: splitParagraphs(rec.content) };
+    const data: ChapterData = { index: i, title: rec.title, paragraphs: splitParagraphs(rec.content), images: rec.images };
     if (activeRef.current && generation === generationRef.current) cacheRef.current.set(i, data);
     return data;
   }

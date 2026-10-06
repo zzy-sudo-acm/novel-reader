@@ -35,11 +35,20 @@ export interface BookMeta {
   progressUpdatedAt?: number;
 }
 
+export interface ChapterIllustration {
+  afterParagraph: number;
+  dataUrl: string;
+  alt: string;
+  width: number;
+  height: number;
+}
+
 export interface ChapterRecord {
   bookId: string;
   index: number;
   title: string;
   content: string;
+  images?: ChapterIllustration[];
 }
 
 export interface Bookmark {
