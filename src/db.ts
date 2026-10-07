@@ -1,4 +1,5 @@
 import type { Bookmark, BookMeta, ChapterRecord, ReadingProgress } from './types';
+import { splitContentParagraphs } from './paragraphs';
 
 const DB_NAME = 'novel-reader';
 const DB_VERSION = 2;
@@ -168,7 +169,7 @@ export async function addBookmark(bookId: string, progress: ReadingProgress, exc
       const chapterRequest = tx.objectStore('chapters').get([bookId, progress.chapterIndex]) as IDBRequest<ChapterRecord | undefined>;
       chapterRequest.onsuccess = () => guard(() => {
         const chapter = chapterRequest.result;
-        const paragraphs = chapter?.content.split(/\r\n|\r|\n/).map((text) => text.trim()).filter(Boolean);
+        const paragraphs = chapter && splitContentParagraphs(chapter.content, chapter.format);
         if (!chapter || !paragraphs || progress.paragraphIndex >= paragraphs.length) {
           throw new Error('书签所在段落已不存在');
         }

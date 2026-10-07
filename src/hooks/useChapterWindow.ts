@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef } from 'react';
 import { getChapter } from '../db';
 import type { ChapterIllustration } from '../types';
+import { splitContentParagraphs } from '../paragraphs';
 import { getScrollTop, getViewportHeight, scrollToY } from '../scroll';
 
 export interface ChapterData {
@@ -15,13 +16,6 @@ const KEEP = 6;
 /** 向下/向上预加载的缓冲区（视口高度倍数） */
 const BUFFER_DOWN = 3;
 const BUFFER_UP = 2;
-
-export function splitParagraphs(content: string): string[] {
-  return content
-    .split(/\r\n|\r|\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0);
-}
 
 /** 元素的逻辑文档坐标（弹层锁定 body 时同样有效） */
 export function documentTop(el: HTMLElement): number {
@@ -108,7 +102,7 @@ export function useChapterWindow({ bookId, activeRef, getChapterCount, canSync, 
     if (cached) return cached;
     const rec = await getChapter(bookId, i);
     if (!rec) throw new Error(`第 ${i + 1} 章正文缺失，请重新导入完整书籍`);
-    const data: ChapterData = { index: i, title: rec.title, paragraphs: splitParagraphs(rec.content), images: rec.images };
+    const data: ChapterData = { index: i, title: rec.title, paragraphs: splitContentParagraphs(rec.content, rec.format), images: rec.images };
     if (activeRef.current && generation === generationRef.current) cacheRef.current.set(i, data);
     return data;
   }

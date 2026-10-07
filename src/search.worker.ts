@@ -1,7 +1,8 @@
 import {
-  createSearchMatch, findLiteralMatch, SEARCH_RESULT_LIMIT, splitSearchParagraphs,
+  createSearchMatch, findLiteralMatch, SEARCH_RESULT_LIMIT,
   type SearchMatch, type SearchWorkerRequest, type SearchWorkerResponse,
 } from './search';
+import { splitContentParagraphs } from './paragraphs';
 import type { ChapterRecord } from './types';
 
 const scope = self as unknown as {
@@ -64,7 +65,8 @@ scope.onmessage = (event) => {
           const cursor = cursorRequest.result;
           if (!cursor) { finished = true; return; }
           const chapter = cursor.value as ChapterRecord;
-          const paragraphs = splitSearchParagraphs(chapter.content);
+          // 与阅读页共用同一切分（format 已盖章在每章上），保证 paragraphIndex 与 data-paragraph 一致
+          const paragraphs = splitContentParagraphs(chapter.content, chapter.format);
           for (let index = 0; index < paragraphs.length; index++) {
             const paragraph = paragraphs[index];
             const hit = findLiteralMatch(paragraph, query);

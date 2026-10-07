@@ -14,7 +14,7 @@ html {
 
 body {
   -webkit-font-smoothing: antialiased;
-  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
   overscroll-behavior: none;
   background: var(--bg, #fff);
   color: var(--fg, #1a1a1a);
@@ -271,6 +271,72 @@ html[data-surface='shelf'] {
 .paras p {
   text-indent: 2em;
   margin-bottom: 0.15em;
+}
+
+/* ---------- 段落内 Markdown（"format": "markdown" 的书） ---------- */
+.paras p .md-h1,
+.paras p .md-h2,
+.paras p .md-h3 {
+  display: block;
+  text-indent: 0;
+  font-weight: 600;
+  color: var(--fg);
+  margin: 0.6em 0 0.3em;
+}
+.paras p .md-h1 {
+  font-size: 1.15em;
+  text-align: center;
+}
+.paras p .md-h2 {
+  font-size: 1.08em;
+}
+.paras p .md-h3 {
+  font-size: 1em;
+}
+.paras p .md-quote {
+  display: block;
+  text-indent: 0;
+  margin: 0.4em 0;
+  padding-left: 0.8em;
+  border-left: 3px solid var(--bar-border);
+  color: var(--fg-dim);
+}
+.paras p code {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.9em;
+  padding: 0.1em 0.3em;
+  border-radius: 4px;
+  background: var(--bar-border);
+}
+.paras p .md-pre {
+  display: block;
+  text-indent: 0;
+  margin: 0.4em 0;
+  padding: 0.6em 0.8em;
+  border-radius: 8px;
+  background: var(--bar-border);
+  /* 保留围栏代码块的换行与缩进（ASCII 树形图等） */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  line-height: 1.4;
+}
+.paras p .md-pre code {
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  font-size: inherit;
+}
+.paras p .md-hr {
+  display: block;
+  text-indent: 0;
+  width: 40%;
+  margin: 1em auto;
+  border-top: 1px solid var(--bar-border);
+}
+.paras p a {
+  color: var(--accent);
 }
 
 .book-end {

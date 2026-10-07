@@ -27,6 +27,8 @@ export interface BookMeta {
   toc: TocEntry[];
   totalChars: number;
   addedAt: number;
+  /** 正文渲染格式，来自 book.json 的 format 字段；缺省为纯文本 */
+  format?: 'markdown';
   /** 实际打开或保存阅读进度的时间；导入不会更新。 */
   lastReadAt?: number;
   readingStatus?: 'unread' | 'reading' | 'finished';
@@ -48,6 +50,8 @@ export interface ChapterRecord {
   index: number;
   title: string;
   content: string;
+  /** 从书籍元信息盖章到每章，供阅读窗口/搜索/书签自包含地切分段落 */
+  format?: 'markdown';
   images?: ChapterIllustration[];
 }
 

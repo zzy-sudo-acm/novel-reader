@@ -39,11 +39,6 @@ export function findLiteralMatch(text: string, query: string): LiteralMatch | nu
   return null;
 }
 
-/** 与 useChapterWindow 的正文拆分保持一致，不引入 React 到 Worker。 */
-export function splitSearchParagraphs(content: string): string[] {
-  return content.split(/\r\n|\r|\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
-}
-
 export const SEARCH_RESULT_LIMIT = 200;
 
 export function createSearchMatch(

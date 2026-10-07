@@ -102,9 +102,9 @@ export default function Bookshelf({ books, importing, onImport, onOpen, onDelete
         </button>
         <input
           ref={fileRef}
-          aria-label="选择小说 JSON 文件"
+          aria-label="选择小说 JSON 或 Markdown 文件"
           type="file"
-          accept=".json,application/json"
+          accept=".json,application/json,.md,text/markdown"
           style={{ display: 'none' }}
           disabled={!!importing}
           onChange={(e) => {

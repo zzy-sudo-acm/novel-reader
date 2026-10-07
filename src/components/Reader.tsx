@@ -13,6 +13,9 @@ import { useReaderGestures } from '../hooks/useReaderGestures';
 import { useReaderViewport } from '../hooks/useReaderViewport';
 import { useScrollTopRecovery } from '../hooks/useScrollTopRecovery';
 
+// 仅 "format": "markdown" 的书按需加载 Markdown 渲染器，纯文本书籍不下载该 chunk
+const InlineMarkdown = React.lazy(() => import('../markdown'));
+
 interface Props {
   bookId: string;
   settings: ReaderSettings;
@@ -295,8 +298,8 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
           '--mg': `${settings.margin}px`,
           fontFamily:
             settings.fontFamily === 'serif'
-              ? "'Songti SC', 'Noto Serif CJK SC', 'SimSun', Georgia, serif"
-              : "-apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif",
+              ? "'Songti SC', 'Noto Serif CJK SC', 'SimSun', Georgia, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', serif"
+              : "-apple-system, 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif",
         } as React.CSSProperties
       }
     >
@@ -323,7 +326,16 @@ export default function Reader({ bookId, settings, onSettingsChange, onExit }: P
                 <div className="paras">
                   {ch.paragraphs.map((t, k) => (
                     <p key={k} data-paragraph={k}>
-                      {highlight?.chapter === i && highlight.paragraph === k ? highlightText(t, highlight.query) : t}
+                      {/* 搜索高亮段保持纯文本 + mark；markdown 书的其余段落按需渲染 */}
+                      {highlight?.chapter === i && highlight.paragraph === k ? (
+                        highlightText(t, highlight.query)
+                      ) : b?.format === 'markdown' ? (
+                        <React.Suspense fallback={t}>
+                          <InlineMarkdown text={t} />
+                        </React.Suspense>
+                      ) : (
+                        t
+                      )}
                       {ch.images?.filter(image => image.afterParagraph === k).map((image, n) => (
                         <span className="book-illustration" key={n} style={{ display: 'block', textIndent: 0, margin: '1em 0' }}>
                           <img src={image.dataUrl} alt={image.alt} width={image.width} height={image.height}

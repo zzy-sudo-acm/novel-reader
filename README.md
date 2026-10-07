@@ -4,7 +4,8 @@
 
 ## 功能
 
-- 导入本地 `book.json`（格式：`{ title, chapters: [{ title, content }] }`），数据存入 IndexedDB，永不上传
+- 导入本地 `book.json`（格式：`{ title, chapters: [{ title, content }] }`）或直接导入 `.md` 文件，数据存入 IndexedDB，永不上传
+- 可选 `"format": "markdown"`：段落内支持粗体/斜体/删除线/行内代码/链接、标题与引用样式、围栏代码块、分隔线、`:smile:` 等 emoji 短代码；直接导入 .md 时自动按 H1 书名、H2 切章，详见 [MARKDOWN_FORMAT.md](MARKDOWN_FORMAT.md)；插图见 [IMAGE_FORMAT.md](IMAGE_FORMAT.md)
 - 连续纵向滚动阅读，章节自动衔接，回收远处章节时保留等高占位；短章节按屏幕缓冲范围保留，避免反复加载
 - 精确阅读进度恢复（按 章节 + 段落 + 段落内进度 定位，改字号/行距/横竖屏后仍能回到原文附近）
 - 书架：书名搜索，按最近阅读 / 最近导入 / 书名排序，未读 / 在读 / 已读完筛选，突出最近在读书；支持手动标为已读完或改回在读
